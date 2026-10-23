@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -129,7 +129,7 @@ export default function Dashboard() {
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Остаток на счёте</p>
                 <p className="mt-1 text-3xl font-bold tabular-nums sm:text-4xl">{formatRub(d.balance)}</p>
-                <p className="mt-1 text-xs text-slate-500">Порог разрыва: {formatRub(d.threshold)}</p>
+                <ThresholdEditor value={d.threshold} onSaved={dashboard.refetch} />
               </div>
               <p className="text-xs text-slate-400">Обновлено: данные из банка (заглушка)</p>
             </div>
@@ -620,5 +620,59 @@ function SelfLoanForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** Настройка порога разрыва T (ТЗ §14: настраивается пользователем, по умолчанию 0 ₽). */
+function ThresholdEditor({ value, onSaved }: { value: number; onSaved: () => void }) {
+  const [draft, setDraft] = useState(String(value));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  async function save() {
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0) {
+      setMsg('Введите число, не меньше 0');
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.user.update({ minBalance: n });
+      setMsg('Сохранено');
+      onSaved();
+    } catch (err) {
+      setMsg(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      <span>Порог разрыва (T)</span>
+      <input
+        type="number"
+        min={0}
+        step={1000}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 tabular-nums text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+      />
+      <span>₽</span>
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy}
+        className="rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      >
+        {busy ? 'Сохраняем…' : 'Сохранить'}
+      </button>
+      {msg && <span className={msg === 'Сохранено' ? 'text-emerald-600' : 'text-red-600'}>{msg}</span>}
+    </div>
   );
 }

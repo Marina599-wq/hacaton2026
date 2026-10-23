@@ -208,6 +208,17 @@ export default function Auth() {
                     {regFile.name} ({(regFile.size / 1024 / 1024).toFixed(1)} МБ)
                   </p>
                 )}
+                <a
+                  href="/statement-template.csv"
+                  download="statement-template.csv"
+                  className="mt-2 inline-block text-xs font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700"
+                >
+                  Скачать шаблон выписки (CSV)
+                </a>
+                <p className="mt-1 text-xs text-slate-400">
+                  Формат: Дата (дд.мм.гггг), Контрагент, ИНН контрагента (необязательно), Назначение,
+                  Сумма (расходы — отрицательные). Колонки можно переставлять.
+                </p>
               </div>
 
               <Button

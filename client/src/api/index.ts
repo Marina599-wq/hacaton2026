@@ -39,6 +39,11 @@ export const api = {
     register: (formData: FormData) => http.upload<AuthResponse>('/auth/register', formData),
     me: () => http.get<{ user: User }>('/auth/me'),
   },
+  user: {
+    /** Обновление профиля; `minBalance` — порог разрыва T (ТЗ §14). */
+    update: (body: Partial<Pick<User, 'companyName' | 'inn' | 'minBalance'>>) =>
+      http.patch<User>('/user', body),
+  },
   dashboard: (horizon: Horizon) => http.get<DashboardResponse>(`/dashboard${qs({ horizon })}`),
   operations: {
     list: (q: { month: string; category?: string; page?: number; limit?: number }) =>
