@@ -1,0 +1,234 @@
+import { useState, type FormEvent } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, Sparkles } from 'lucide-react';
+import { api, errorMessage } from '@/api';
+import { useAuthStore } from '@/store/auth';
+import { Button, Card, Field, Input } from '@/components/ui';
+import { cn } from '@/lib/cn';
+import type { AuthResponse } from '@/types/api';
+
+const MAX_FILE_MB = 5;
+const ACCEPTED = ['.csv', '.xlsx'];
+
+export default function Auth() {
+  const [tab, setTab] = useState<'login' | 'register'>('login');
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const setAuth = useAuthStore((s) => s.setAuth);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? '/';
+
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regCompany, setRegCompany] = useState('');
+  const [regInn, setRegInn] = useState('');
+  const [regFile, setRegFile] = useState<File | null>(null);
+  const [useDemo, setUseDemo] = useState(false);
+
+  function finish(res: AuthResponse) {
+    setAuth(res.token, res.user);
+    navigate(from, { replace: true });
+  }
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setFormError(null);
+    try {
+      finish(await api.auth.login({ email: loginEmail.trim(), password: loginPassword }));
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function validateRegister(): string | null {
+    if (!/^\S+@\S+\.\S+$/.test(regEmail.trim())) return 'Укажите корректный email';
+    if (regPassword.length < 8) return 'Пароль — минимум 8 символов';
+    if (!regCompany.trim()) return 'Укажите название компании или ИП';
+    if (!/^[0-9]{10}$|^[0-9]{12}$/.test(regInn.trim())) return 'ИНН — 10 или 12 цифр';
+    if (!useDemo) {
+      if (!regFile) return 'Загрузите выписку (CSV/XLSX) или включите демо-данные';
+      const ext = `.${regFile.name.split('.').pop()?.toLowerCase()}`;
+      if (!ACCEPTED.includes(ext)) return 'Допускаются только файлы .csv или .xlsx';
+      if (regFile.size > MAX_FILE_MB * 1024 * 1024) return `Файл больше ${MAX_FILE_MB} МБ`;
+    }
+    return null;
+  }
+
+  async function handleRegister(e: FormEvent) {
+    e.preventDefault();
+    const problem = validateRegister();
+    if (problem) {
+      setFormError(problem);
+      return;
+    }
+    setBusy(true);
+    setFormError(null);
+    const fd = new FormData();
+    fd.append('email', regEmail.trim());
+    fd.append('password', regPassword);
+    fd.append('companyName', regCompany.trim());
+    fd.append('inn', regInn.trim());
+    if (useDemo) fd.append('useDemoData', 'true');
+    else if (regFile) fd.append('file', regFile);
+    try {
+      finish(await api.auth.register(fd));
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
+      <div className="w-full max-w-md">
+        <div className="mb-5 flex items-center justify-center gap-2.5">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 text-lg font-bold text-white">
+            ₽
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-900">Кассовые разрывы</h1>
+            <p className="text-xs text-slate-500">Прогноз кассовых разрывов по банковскому счёту</p>
+          </div>
+        </div>
+
+        <Card>
+          <div className="mb-4 grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-sm font-medium">
+            <button
+              type="button"
+              onClick={() => {
+                setTab('login');
+                setFormError(null);
+              }}
+              className={cn('rounded-md py-1.5', tab === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTab('register');
+                setFormError(null);
+              }}
+              className={cn('rounded-md py-1.5', tab === 'register' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}
+            >
+              Регистрация
+            </button>
+          </div>
+
+          {formError && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{formError}</span>
+            </div>
+          )}
+
+          {tab === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-3">
+              <Field label="Email">
+                <Input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="you@company.ru"
+                  autoComplete="email"
+                />
+              </Field>
+              <Field label="Пароль">
+                <Input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                />
+              </Field>
+              <Button type="submit" loading={busy} className="w-full">
+                Войти
+              </Button>
+              <p className="text-center text-xs text-slate-400">
+                Демо-вход (после seed): demo@cashflow.ru · demo1234
+              </p>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="you@company.ru"
+                  />
+                </Field>
+                <Field label="Пароль (мин. 8)">
+                  <Input
+                    type="password"
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </Field>
+              </div>
+              <Field label="Компания / ИП">
+                <Input
+                  value={regCompany}
+                  onChange={(e) => setRegCompany(e.target.value)}
+                  placeholder="ООО «Ромашка» или ИП Иванов"
+                />
+              </Field>
+              <Field label="ИНН (10 или 12 цифр)">
+                <Input
+                  value={regInn}
+                  onChange={(e) => setRegInn(e.target.value)}
+                  placeholder="7701234567"
+                  inputMode="numeric"
+                />
+              </Field>
+
+              <div>
+                <Field label="Выписка по счёту за 1,5–2 года (CSV/XLSX, до 5 МБ)">
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx"
+                    disabled={useDemo}
+                    onChange={(e) => setRegFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-sm text-slate-500 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200 disabled:opacity-50"
+                  />
+                </Field>
+                {regFile && !useDemo && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {regFile.name} ({(regFile.size / 1024 / 1024).toFixed(1)} МБ)
+                  </p>
+                )}
+              </div>
+
+              <Button
+                variant={useDemo ? 'primary' : 'secondary'}
+                icon={Sparkles}
+                className="w-full"
+                onClick={() => {
+                  setUseDemo(!useDemo);
+                  if (!useDemo) setRegFile(null);
+                }}
+              >
+                {useDemo ? 'Выбраны демо-данные' : 'Использовать демо-данные'}
+              </Button>
+
+              <Button type="submit" loading={busy} className="w-full">
+                Зарегистрироваться
+              </Button>
+            </form>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
