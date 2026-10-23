@@ -23,3 +23,8 @@ Scope: four confirmed frontend bugs + TZ gaps (threshold T config, statement tem
   CHECK: node client/scripts/verify-tz-gaps.mjs
   EXPECT: tz gap fixes verified
   EVIDENCE: automatic-evidence=v1; definition-sha256=2e92a8cb4b0288572e223302117c9852133009ab30cc600e31fce956c5b2b2a5; exit=0; EXPECT=matched; output-sha256=6e58eaf77eb9ee16f9133e29a5b763c31bb87bf3f76f3619d141c17de3e1a2a2; output-bytes=409; shell=C:\WINDOWS\system32\cmd.exe; cwd=C:\Users\Admin\hacaton2026; path=ee3755371776/45 entries
+
+- [x] G5: remaining TZ mismatches fixed: nav 4 + menu on main, flame icons, loan rate on bank page, /history/:id
+  CHECK: node client/scripts/verify-tz-p2.mjs
+  EXPECT: tz p2 mismatches fixed
+  EVIDENCE: automatic-evidence=v1; definition-sha256=1698e2b17b52454a08b8c58540d97f448e9adf6b17ab4c0212a8bda8305512da; exit=0; EXPECT=matched; output-sha256=cf459210b66e83244f9003924677086364af814cbd483b8b2ec15a926ceb7371; output-bytes=421; shell=C:\WINDOWS\system32\cmd.exe; cwd=C:\Users\Admin\hacaton2026; path=ee3755371776/45 entries

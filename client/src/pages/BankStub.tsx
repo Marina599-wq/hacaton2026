@@ -92,6 +92,12 @@ export default function BankStub() {
             <Field label="Срок (дней)">
               <Input type="number" min="1" step="1" value={termDays} onChange={(e) => setTermDays(e.target.value)} />
             </Field>
+            {dashboard.data?.loanRatePct != null && (
+              <p className="text-xs text-slate-500">
+                Условная ставка: <b className="tabular-nums">{dashboard.data.loanRatePct}%</b> — фиксированная
+                константа из конфига (демо).
+              </p>
+            )}
             {error && <p className="text-xs text-red-600">{error}</p>}
             <Button type="submit" loading={busy}>
               Оформить

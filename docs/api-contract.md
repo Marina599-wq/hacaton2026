@@ -96,12 +96,16 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
   "balance": 1234567.89,
   "threshold": 0,
   "horizon": 90,
+  "loanRatePct": 9.5,
   "summary": { "income": 0, "expense": 0, "balanceChange": 0 },
   "forecast": { "series": [], "gapDate": "2026-11-02", "gapProbabilityPct": 64, "gapAmount": 185000 },
   "dangerDays": ["2026-11-02"],
   "goodDays": ["2026-11-15"]
 }
 ```
+
+- `loanRatePct` (опционально): условная ставка банковского займа, % — фиксированная константа из конфига
+  бэкенда; отображается на странице «Запрос у банка» (ТЗ §5.7).
 
 ### GET /operations?month=YYYY-MM&category=&page=1&limit=20
 

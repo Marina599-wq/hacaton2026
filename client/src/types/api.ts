@@ -65,6 +65,8 @@ export interface DashboardResponse {
   balance: number;
   threshold: number;
   horizon: number;
+  /** Условная ставка банковского займа, % (фиксированная константа из конфига, ТЗ §5.7). Опционально. */
+  loanRatePct?: number;
   summary: {
     income: number;
     expense: number;

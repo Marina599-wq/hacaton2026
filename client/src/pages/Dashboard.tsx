@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  CalendarDays,
   CheckCircle2,
+  FlaskConical,
   PiggyBank,
   Plus,
   Wallet,
@@ -297,6 +299,18 @@ export default function Dashboard() {
               </div>
             )}
             {selfLoans.error && <p className="mt-3 text-xs text-red-500">Не удалось загрузить самозаймы</p>}
+          </Card>
+
+          {/* 6. Пункты меню: песочница и календарь (ТЗ §5.2.6) */}
+          <Card title="Меню">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button variant="secondary" icon={FlaskConical} onClick={() => navigate('/sandbox')}>
+                Песочница — смоделировать расход или доход
+              </Button>
+              <Button variant="secondary" icon={CalendarDays} onClick={() => navigate('/calendar')}>
+                Календарь — опасные и хорошие дни
+              </Button>
+            </div>
           </Card>
         </>
       )}

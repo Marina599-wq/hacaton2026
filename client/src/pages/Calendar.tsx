@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Flame } from 'lucide-react';
 import { api } from '@/api';
 import { useAsync } from '@/hooks/useAsync';
 import { Badge, Button, Card, ErrorState, Modal, Skeleton } from '@/components/ui';
@@ -66,7 +66,7 @@ export default function Calendar() {
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
             <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> опасные дни
+              <Flame size={12} className="text-red-500" /> опасные дни
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> хорошие дни
@@ -104,7 +104,7 @@ export default function Calendar() {
                     )}
                   >
                     <span className="font-medium">{Number(dayStr.slice(8))}</span>
-                    {day?.status === 'danger' && <span className="mt-1 h-1 w-1 rounded-full bg-red-500" />}
+                    {day?.status === 'danger' && <Flame size={11} className="mt-0.5 text-red-500" />}
                     {day?.status === 'good' && <span className="mt-1 h-1 w-1 rounded-full bg-emerald-500" />}
                   </button>
                 );
