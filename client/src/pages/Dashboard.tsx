@@ -117,6 +117,11 @@ export default function Dashboard() {
               <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
             </div>
           )}
+          {dashboard.error && !dashboard.loading && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-600">
+              Ошибка обновления данных: {dashboard.error.message}. Показаны последние загруженные значения.
+            </div>
+          )}
 
           {/* 1. Общий баланс */}
           <Card>

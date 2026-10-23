@@ -25,6 +25,7 @@ export default function Payments() {
   const [result, setResult] = useState<BankPaymentResponse | null>(null);
 
   const [pullBusy, setPullBusy] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
   const [pulled, setPulled] = useState<Operation[] | null>(null);
 
   async function submit(e: FormEvent) {
@@ -56,11 +57,12 @@ export default function Payments() {
 
   async function pull() {
     setPullBusy(true);
+    setPullError(null);
     try {
       const res = await api.bank.transactions({ from: shiftMonth(currentMonth(), -1), to: todayISO() });
       setPulled(res.operations);
     } catch (err) {
-      setError(errorMessage(err));
+      setPullError(errorMessage(err));
     } finally {
       setPullBusy(false);
     }
@@ -139,6 +141,7 @@ export default function Payments() {
           </Button>
         }
       >
+        {pullError && <p className="mb-2 text-xs text-red-600">{pullError}</p>}
         {pulled == null ? (
           <EmptyState title="Данных пока нет" hint="Заглушка банка вернёт последние операции со счёта" />
         ) : pulled.length === 0 ? (

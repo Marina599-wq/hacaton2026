@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuthStore } from '@/store/auth';
 import Auth from '@/pages/Auth';
@@ -14,7 +14,10 @@ import BankStub from '@/pages/BankStub';
 
 function Protected({ children }: { children: ReactElement }) {
   const token = useAuthStore((s) => s.token);
-  if (!token) return <Navigate to="/auth" replace />;
+  const location = useLocation();
+  if (!token) {
+    return <Navigate to="/auth" replace state={{ from: location.pathname + location.search }} />;
+  }
   return children;
 }
 

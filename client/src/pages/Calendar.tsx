@@ -26,6 +26,11 @@ export default function Calendar() {
   const [selected, setSelected] = useState<CalendarDay | null>(null);
   const cal = useAsync(() => api.calendar.month(month), [month]);
 
+  function changeMonth(delta: number) {
+    setMonth((m) => shiftMonth(m, delta));
+    setSelected(null);
+  }
+
   const year = Number(month.slice(0, 4));
   const mon = Number(month.slice(5, 7));
   const first = new Date(year, mon - 1, 1);
@@ -47,7 +52,7 @@ export default function Calendar() {
               variant="secondary"
               size="sm"
               icon={ChevronLeft}
-              onClick={() => setMonth((m) => shiftMonth(m, -1))}
+              onClick={() => changeMonth(-1)}
               aria-label="Предыдущий месяц"
             />
             <span className="min-w-36 text-center text-sm font-semibold">{monthLabel(month)}</span>
@@ -55,7 +60,7 @@ export default function Calendar() {
               variant="secondary"
               size="sm"
               icon={ChevronRight}
-              onClick={() => setMonth((m) => shiftMonth(m, 1))}
+              onClick={() => changeMonth(1)}
               aria-label="Следующий месяц"
             />
           </div>
