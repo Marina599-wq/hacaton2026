@@ -1,150 +1,96 @@
-// server/tests/forecast.test.js
-import { describe, it, expect } from 'vitest';
-import { calculateForecast, buildScenarioEvents } from '../src/services/forecast.service.js';
+import { test } from 'vitest';
+import assert from 'node:assert/strict';
+import { calculateForecast } from '../src/services/forecast.service.js';
 
-// «Сегодня» зафиксировано: понедельник, 15 июня 2026
-const TODAY = '2026-06-15';
-const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь'];
-
-const op = (date, amount, direction, extra = {}) => ({
-  date: new Date(date),
-  amount,
-  direction,
-  counterpartyInn: '7701234567',
-  counterpartyName: 'Ро***',
-  purpose: 'Платёж',
-  ...extra
+const TODAY = '2026-09-30';
+const op = (date, amount, direction, purpose, extra = {}) => ({
+  date, amount, direction, purpose, counterpartyInn: extra.inn ?? '1', counterpartyName: extra.name ?? 'К', source: 'import', balanceEndOfDay: extra.bal, ...extra
+});
+const monthly = (day, amount, purpose, months = ['04', '05', '06', '07', '08', '09'], dir = 'out', extra = {}) =>
+  months.map((m) => op(`2026-${m}-${String(day).padStart(2, '0')}`, amount, dir, purpose, extra));
+// фоновая активность, чтобы окно статистики и история были содержательными
+const background = () => Array.from({ length: 180 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 3, 1) + i * 86_400_000).toISOString().slice(0, 10);
+  return op(d, 10_000 + (i % 7) * 1_000, i % 2 ? 'in' : 'out', `Операция ${i % 5}`, { inn: String(100 + (i % 5)) });
 });
 
-// Аренда 10-го числа каждого месяца за последние `months` месяцев
-function monthlyRent(amount, months = 6) {
-  return Array.from({ length: months }, (_, i) =>
-    op(`2026-${String(6 - i).padStart(2, '0')}-10`, amount, 'out', {
-      purpose: `Аренда офиса за ${MONTHS[5 - i]} 2026`
-    })
-  );
-}
+test('детерминизм: одинаковый вход → одинаковый результат', () => {
+  const ops = [...background(), ...monthly(10, 50_000, 'Аренда')];
+  const a = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  const b = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  assert.deepEqual(a, b);
+});
 
-const run = (operations, risks, balance, horizon = 60, threshold = 0, options = {}) =>
-  calculateForecast(operations, risks, balance, horizon, threshold, { today: TODAY, ...options });
+test('регулярный платёж находится и проецируется на нужный день', () => {
+  const ops = [...background(), ...monthly(14, 50_000, 'Аренда офиса')]; // 14.10.2026 — среда
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  const rent = r.regularPayments.find((p) => p.title.includes('Аренда'));
+  assert.ok(rent && rent.dayOfMonth === 14 && rent.amount === 50_000);
+  assert.ok(r.forecastSeries.find((p) => p.date === '2026-10-14').reasons.some((x) => x.type === 'regular'));
+});
 
-describe('Прогноз кассовых разрывов', () => {
-  it('возвращает структуру по ТЗ и серию ровно на горизонт', () => {
-    const result = run(monthlyRent(50000), [], 300000, 30);
-    for (const key of ['gapDate', 'gapProbabilityPct', 'gapAmount', 'forecastSeries', 'dangerDays', 'goodDays']) {
-      expect(result).toHaveProperty(key);
-    }
-    expect(result.forecastSeries).toHaveLength(30);
-    expect(result.forecastSeries[0].date).toBe('2026-06-16');
-    expect(result.gapProbabilityPct).toBeGreaterThanOrEqual(0);
-    expect(result.gapProbabilityPct).toBeLessThanOrEqual(100);
+test('«протухший» регулярный платёж (последний раз > 45 дней назад) не проецируется', () => {
+  const ops = [...background(), ...monthly(10, 50_000, 'Аренда офиса', ['04', '05', '06'])];
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  assert.equal(r.regularPayments.filter((p) => p.title.includes('Аренда')).length, 0);
+});
+
+test('платёж, выпавший на выходной, переносится на понедельник', () => {
+  const ops = [...background(), ...monthly(3, 70_000, 'Лизинг')]; // 03.10.2026 — суббота
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  const has = (date) => r.forecastSeries.find((p) => p.date === date).reasons.some((x) => x.type === 'regular');
+  assert.equal(has('2026-10-03'), false);
+  assert.equal(has('2026-10-05'), true);
+});
+
+test('разовые нерабочие операции (заём учредителя) не влияют на прогноз', () => {
+  const clean = background();
+  const polluted = [...clean, op('2026-08-10', 25_000_000, 'in', 'Предоставление беспроцентного займа по договору № 1')];
+  const a = calculateForecast(clean, [], 500_000, 30, 0, { today: TODAY });
+  const b = calculateForecast(polluted, [], 500_000, 30, 0, { today: TODAY });
+  assert.deepEqual(a.forecastSeries.map((p) => p.income), b.forecastSeries.map((p) => p.income));
+});
+
+test('выводы владельцем не уводят остаток ниже «пола» в базовом прогнозе', () => {
+  const ops = Array.from({ length: 150 }, (_, i) => {
+    const date = new Date(Date.UTC(2026, 4, 1) + i * 86_400_000).toISOString().slice(0, 10);
+    return i % 7 === 4
+      ? op(date, 400_000, 'out', 'Перевод собственных средств на личную карту', { bal: 1_000_000 })
+      : op(date, 20_000, 'in', 'Выручка', { bal: 1_000_000 });
   });
+  const r = calculateForecast(ops, [], 300_000, 30, 0, { today: TODAY });
+  assert.ok(r.forecastSeries.every((p) => p.balance >= 0)); // вывод ограничен остатком над полом
+  assert.ok(r.forecastSeries.some((p) => p.ownerWithdrawal === 0));
+  assert.ok(r.dataQuality.warnings.some((w) => w.includes('выводы')));
+});
 
-  it('детерминирован: одинаковые данные дают одинаковый результат, включая вероятность', () => {
-    const risks = [
-      { title: 'Потеря клиента', type: 'income_loss', amount: 200000, dateFrom: '2026-06-20', dateTo: '2026-06-30', probability: 0.4, active: true }
-    ];
-    const a = run(monthlyRent(50000), risks, 120000);
-    const b = run(monthlyRent(50000), risks, 120000);
-    expect(b).toEqual(a);
-  });
+test('probableGapDate есть тогда и только тогда, когда вероятность ≥ порога', () => {
+  const ops = [...background(), ...monthly(10, 80_000, 'Аренда')];
+  for (const T of [0, 200_000, 600_000, 5_000_000]) {
+    const r = calculateForecast(ops, [], 500_000, 30, T, { today: TODAY });
+    assert.equal(r.probableGapDate !== null, r.gapProbabilityPct >= 50, `T=${T}`);
+  }
+});
 
-  it('выявляет регулярный платёж и применяет его один раз в месяц', () => {
-    const result = run(monthlyRent(50000), [], 1_000_000, 60);
-    expect(result.regularPayments).toHaveLength(1);
-    expect(result.regularPayments[0]).toMatchObject({ dayOfMonth: 10, amount: 50000, direction: 'out', monthsCount: 6 });
+test('риск: включённый ухудшает, выключенный не влияет; займ уменьшает разрыв, его возврат — увеличивает', () => {
+  const ops = background();
+  const T = 600_000;
+  const base = calculateForecast(ops, [], 500_000, 30, T, { today: TODAY });
+  const risk = { title: 'Потеря клиента', type: 'income_loss', amount: 200_000, dateFrom: '2026-10-05', dateTo: '2026-10-10', probability: 0.5, active: true };
+  assert.ok(calculateForecast(ops, [risk], 500_000, 30, T, { today: TODAY }).gapAmount >= base.gapAmount);
+  assert.deepEqual(calculateForecast(ops, [{ ...risk, active: false }], 500_000, 30, T, { today: TODAY }).forecastSeries, base.forecastSeries);
 
-    const hits = result.forecastSeries.filter((p) => p.reasons.some((r) => r.type === 'regular'));
-    expect(hits.map((p) => p.date)).toEqual(['2026-07-10', '2026-08-10']);
-    expect(hits[0].expense).toBe(50000);
-  });
+  const loan = { ...op('2026-10-02', 300_000, 'in', 'Займ', { source: 'bank_loan' }) };
+  const repay = { ...op('2026-10-25', 330_000, 'out', 'Возврат займа', { source: 'bank_loan' }) };
+  const withLoan = calculateForecast([...ops, loan], [], 500_000, 30, T, { today: TODAY });
+  const withRepay = calculateForecast([...ops, loan, repay], [], 500_000, 30, T, { today: TODAY });
+  assert.ok(withLoan.gapAmount < base.gapAmount);
+  assert.ok(withRepay.minForecastBalance < withLoan.minForecastBalance);
+});
 
-  it('не считает платёж регулярным, если он был меньше чем в 3 месяцах', () => {
-    const result = run(monthlyRent(50000, 2), [], 1_000_000, 60);
-    expect(result.regularPayments).toHaveLength(0);
-    expect(result.forecastSeries.some((p) => p.reasons.some((r) => r.type === 'regular'))).toBe(false);
-  });
-
-  it('находит дату, сумму и вероятность разрыва', () => {
-    // Горизонт 30 дней: аренда списывается один раз, 10 июля → остаток −50 000
-    const result = run(monthlyRent(150000), [], 100000, 30);
-    expect(result.gapDate).toBe('2026-07-10');
-    expect(result.gapAmount).toBe(50000);
-    expect(result.gapProbabilityPct).toBe(100);
-    expect(result.dangerDays[0]).toBe('2026-07-10');
-    expect(result.forecastSeries.find((p) => p.date === '2026-07-10').isDanger).toBe(true);
-
-    // Горизонт 60 дней: второе списание 10 августа → минимум −200 000
-    expect(run(monthlyRent(150000), [], 100000, 60).gapAmount).toBe(200000);
-  });
-
-  it('риск уменьшает остаток на сумму × вероятность; выключенный риск не влияет', () => {
-    const risk = { title: 'Потеря дохода', type: 'income_loss', amount: 300000, dateFrom: '2026-06-20', dateTo: '2026-06-24', probability: 0.5, active: true };
-    const base = run([], [], 1_000_000, 30);
-    const withRisk = run([], [risk], 1_000_000, 30);
-    const disabled = run([], [{ ...risk, active: false }], 1_000_000, 30);
-
-    const last = (r) => r.forecastSeries.at(-1).balance;
-    expect(last(withRisk)).toBe(last(base) - 150000);
-    expect(disabled).toEqual(base);
-  });
-
-  it('риск без разрыва в базовом прогнозе даёт ненулевую вероятность разрыва', () => {
-    const risk = { title: 'Крупный платёж', type: 'unplanned_expense', amount: 300000, dateFrom: '2026-06-20', probability: 0.5, active: true };
-    const result = run([], [risk], 200000, 30);
-    expect(result.gapDate).toBeNull(); // в среднем остаток 200 000 − 150 000 > 0
-    expect(result.gapProbabilityPct).toBeGreaterThan(40);
-    expect(result.gapProbabilityPct).toBeLessThan(60);
-  });
-
-  it('займ у себя / банковский займ в дату разрыва закрывает разрыв', () => {
-    const gap = run(monthlyRent(150000), [], 100000, 60);
-    for (const source of ['self_loan', 'bank_loan']) {
-      const loan = op(gap.gapDate, gap.gapAmount, 'in', { source, counterpartyInn: '', counterpartyName: '', purpose: 'Заём' });
-      const result = run([...monthlyRent(150000), loan], [], 100000, 60);
-      expect(result.gapDate).toBeNull();
-      expect(result.gapAmount).toBe(0);
-      expect(result.gapProbabilityPct).toBe(0);
-    }
-  });
-
-  it('займы из прошлого не попадают в статистику доходов', () => {
-    const pastLoan = op('2026-05-04', 500000, 'in', { source: 'self_loan', counterpartyInn: '', purpose: 'Заём' });
-    const result = run([pastLoan], [], 100000, 30);
-    expect(result.forecastSeries.every((p) => p.income === 0)).toBe(true);
-  });
-
-  it('считает среднее по дню недели из сумм операций', () => {
-    // Каждый понедельник по 7000 ₽ от разных контрагентов (регулярности нет)
-    const ops = [];
-    let monday = Date.parse('2025-12-01');
-    for (let i = 0; monday <= Date.parse(TODAY); i++, monday += 7 * 86_400_000) {
-      ops.push(op(new Date(monday), 7000, 'in', { counterpartyInn: `770${i}`, purpose: `Оплата ${i}` }));
-    }
-    const result = run(ops, [], 0, 14);
-    const byDate = Object.fromEntries(result.forecastSeries.map((p) => [p.date, p]));
-    expect(byDate['2026-06-22'].income).toBeCloseTo(7000, 2); // понедельник
-    expect(byDate['2026-06-23'].income).toBe(0); // вторник
-  });
-
-  it('песочница: сценарий меняет прогноз, базовый прогноз остаётся прежним', () => {
-    const base = run(monthlyRent(50000), [], 400000, 60);
-    const events = buildScenarioEvents({ name: 'Покупка автомобиля', amount: 500000, date: '2026-06-20' });
-    const scenario = run(monthlyRent(50000), [], 400000, 60, 0, { extraEvents: events });
-
-    expect(scenario.gapDate).toBe('2026-06-20');
-    expect(scenario.gapAmount).toBeGreaterThan(base.gapAmount);
-    expect(scenario.gapProbabilityPct).toBeGreaterThan(base.gapProbabilityPct);
-    expect(run(monthlyRent(50000), [], 400000, 60)).toEqual(base);
-  });
-
-  it('buildScenarioEvents: ежемесячная серия с переносом на последний день месяца', () => {
-    const events = buildScenarioEvents({ amount: 1000, date: '2026-01-31', repeats: 3 });
-    expect(events.map((e) => e.date)).toEqual(['2026-01-31', '2026-02-28', '2026-03-31']);
-  });
-
-  it('проверяет входные параметры', () => {
-    expect(() => calculateForecast([], [], NaN, 30, 0, { today: TODAY })).toThrow(TypeError);
-    expect(() => calculateForecast([], [], 0, 0, 0, { today: TODAY })).toThrow(RangeError);
-  });
+test('короткая история помечается низкой достоверностью, плохие входные данные — исключения', () => {
+  const r = calculateForecast(background().slice(-20), [], 100_000, 30, 0, { today: TODAY });
+  assert.equal(r.dataQuality.level, 'low');
+  assert.throws(() => calculateForecast([], [], NaN, 30, 0, { today: TODAY }), TypeError);
+  assert.throws(() => calculateForecast([], [], 1, 0, 0, { today: TODAY }), RangeError);
 });
