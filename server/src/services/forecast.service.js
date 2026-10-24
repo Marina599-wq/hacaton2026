@@ -72,6 +72,32 @@ function normalizePurpose(purpose) {
     .trim();
 }
 
+/* ------------- усечённое нормальное распределение с сохранением среднего ------------- */
+
+// max(0, N(m, σ)) завышает среднее, когда σ сопоставима со средним (рваные потоки). preserveMean подбирает m' так, чтобы E[max(0, N(m', σ))] = mu.
+function erf(x) {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return x >= 0 ? y : -y;
+}
+const normalCdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+const normalPdf = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+const truncatedMean = (m, sd) => (sd > 0 ? m * normalCdf(m / sd) + sd * normalPdf(m / sd) : Math.max(0, m));
+
+function preserveMean(mu, sd) {
+  if (!(sd > 0) || mu <= 0) return mu;
+  let lo = -8 * sd;
+  let hi = mu;
+  for (let k = 0; k < 60; k++) {
+    const mid = (lo + hi) / 2;
+    if (truncatedMean(mid, sd) < mu) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const quantile = (sorted, q) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : 0);
+
 /* ------------------------- детерминированный генератор ------------------------- */
 
 // mulberry32: небольшой быстрый PRNG, воспроизводимый по seed
@@ -124,8 +150,11 @@ function normalizeOperations(operations, cfg) {
       name: op.counterpartyName ?? '',
       purpose: op.purpose ?? '',
       source: op.source ?? '',
+      bal: Number(op.balanceEndOfDay ?? op.bal),
       isFinancing: FINANCING_SOURCES.has(op.source),
-      // переводы между своими счетами — не доход и не расход, в историю не входят
+      // разовые нерабочие поступления/списания (заём учредителя, уставный капитал, исполнительный лист, обеспечительный платёж) не должны попадать в статистику
+      isNonOp: Boolean(cfg.nonOperatingPattern && cfg.nonOperatingPattern.test(op.purpose ?? '')),
+      // переводы между своими счетами — не доход и не расход, но выводы владельцем моделируются отдельно (см. ownerWithdrawals)
       isTransfer: Boolean(cfg.excludeInternalTransfers && cfg.internalTransferPattern.test(op.purpose ?? ''))
     });
   }
@@ -138,7 +167,7 @@ function detectRegularPayments(history, today, cfg) {
   const groups = new Map();
 
   for (const op of history) {
-    if (op.isFinancing || op.isTransfer || op.day < windowStart || op.day > today) continue;
+    if (op.isFinancing || op.isTransfer || op.isNonOp || op.day < windowStart || op.day > today) continue;
     const purposeKey = normalizePurpose(op.purpose);
     if (!op.inn && !purposeKey) continue;
     const key = [op.direction, op.inn, op.name, purposeKey].join('|');
@@ -156,6 +185,9 @@ function detectRegularPayments(history, today, cfg) {
       const months = new Set(matching.map((op) => op.monthKey));
       if (months.size < cfg.regularityMinMonths) continue;
       if (matching.length / months.size > cfg.regularityMaxOpsPerMonth) continue;
+      // «Протухший» платёж (контрагент перестал платить) не проецируем в будущее
+      const lastDay = matching.reduce((max, op) => Math.max(max, op.day), -Infinity);
+      if (cfg.regularityMaxStaleDays != null && today - lastDay > cfg.regularityMaxStaleDays) continue;
 
       regular.push({
         key,
@@ -186,9 +218,9 @@ function clusterByDayOfMonth(ops, tolerance) {
 // Нерегулярная часть: среднее и σ дневных сумм по дню недели за последние 6 месяцев; регулярные платежи и займы исключены.
 function calculateWeekdayStats(history, regularOps, today, cfg) {
   const zero = { avgIncome: 0, avgExpense: 0, stdIncome: 0, stdExpense: 0 };
-  const base = history.filter((op) => !op.isFinancing && !op.isTransfer && op.day <= today);
+  const base = history.filter((op) => !op.isFinancing && !op.isTransfer && !op.isNonOp && op.day <= today);
   if (!base.length) {
-    return { byWeekday: Array.from({ length: 7 }, () => ({ ...zero })), avgDailyIncome: 0, windowDays: 0 };
+    return { byWeekday: Array.from({ length: 7 }, () => ({ ...zero })), avgDailyIncome: 0, windowDays: 0, daily: null, ownerWithdrawals: null };
   }
 
   const earliest = base.reduce((min, op) => Math.min(min, op.day), Infinity);
@@ -223,7 +255,42 @@ function calculateWeekdayStats(history, regularOps, today, cfg) {
     stdExpense: stdOf(a.sOut, a.qOut, a.n)
   }));
 
-  return { byWeekday, avgDailyIncome: totalIncome / windowDays, windowDays };
+  return {
+    byWeekday,
+    avgDailyIncome: totalIncome / windowDays,
+    windowDays,
+    daily: { start: windowStart, incomes, expenses },
+    ownerWithdrawals: calculateOwnerWithdrawals(history, windowStart, windowDays, today, cfg, stdOf)
+  };
+}
+
+// Выводы владельцем (переводы на личные/свои счета) — не операционный поток: владелец выводит излишек выше некоторого уровня, поэтому
+// вывод ограничен остатком над «полом» (квантиль исторических остатков). Без остатков в выписке модель отключается.
+function calculateOwnerWithdrawals(history, windowStart, windowDays, today, cfg, stdOf) {
+  if (!cfg.ownerWithdrawalsEnabled) return null;
+  const amounts = new Float64Array(windowDays);
+  const eodByDay = new Map();
+  let hasWithdrawals = false;
+  for (const op of history) {
+    if (op.day < windowStart || op.day > today) continue;
+    if (op.isTransfer && op.direction === 'out') {
+      amounts[op.day - windowStart] += op.amount;
+      hasWithdrawals = true;
+    }
+    if (Number.isFinite(op.bal)) eodByDay.set(op.day, op.bal);
+  }
+  if (!hasWithdrawals || eodByDay.size < 10) return null;
+
+  const acc = Array.from({ length: 7 }, () => ({ n: 0, s: 0, q: 0 }));
+  for (let k = 0; k < windowDays; k++) {
+    const a = acc[weekdayOf(windowStart + k)];
+    a.n++;
+    a.s += amounts[k];
+    a.q += amounts[k] * amounts[k];
+  }
+  const byWeekday = acc.map((a) => ({ avg: a.n ? a.s / a.n : 0, std: stdOf(a.s, a.q, a.n) }));
+  const balances = Array.from(eodByDay.values()).sort((x, y) => x - y);
+  return { byWeekday, floor: quantile(balances, cfg.ownerWithdrawalsFloorQuantile) };
 }
 
 // Будущие операции (в т. ч. займы) и события песочницы, разложенные по дням горизонта.
@@ -288,7 +355,21 @@ function buildRiskPlans(risks, today, horizon) {
   return plans;
 }
 
-function buildDailyPlan({ today, horizon, regular, scheduled }) {
+// Банк проводит платёж с выходного в ближайший рабочий день (в выписках операций в сб/вс практически нет)
+function isRegularPaymentDay(pay, dayIdx, d, dim, cfg) {
+  if (!cfg.regularShiftFromWeekends) return d === Math.min(pay.dayOfMonth, dim);
+  for (let back = 0; back <= 2; back++) {
+    const c = dayIdx - back;
+    const cv = civil(c);
+    if (cv.d !== Math.min(pay.dayOfMonth, daysInMonth(cv.y, cv.m))) continue;
+    const wd = weekdayOf(c);
+    const effective = wd === 6 ? c + 2 : wd === 0 ? c + 1 : c;
+    if (effective === dayIdx) return true;
+  }
+  return false;
+}
+
+function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
   const days = [];
   for (let i = 0; i < horizon; i++) {
     const dayIdx = today + 1 + i;
@@ -307,7 +388,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled }) {
 
     // Регулярный платёж срабатывает один раз в месяц; 31-е в коротком месяце → последний день
     for (const pay of regular) {
-      if (d !== Math.min(pay.dayOfMonth, dim)) continue;
+      if (!isRegularPaymentDay(pay, dayIdx, d, dim, cfg)) continue;
       const signed = pay.direction === 'in' ? pay.amount : -pay.amount;
       if (pay.direction === 'in') {
         day.regularIn += pay.amount;
@@ -338,25 +419,56 @@ function buildDailyPlan({ today, horizon, regular, scheduled }) {
 
 /* ------------------------------- Монте-Карло ------------------------------- */
 
-// Монте-Карло (ТЗ §6.3): доля прогонов, где остаток ниже T; доход/расход ~ N(среднее, σ) по дню недели; риски реализуются целиком со своей вероятностью.
-function simulateGapProbability({ days, stats, riskPlans, currentBalance, threshold, runs, seed }) {
+// Монте-Карло (ТЗ §6.3): доля прогонов, где остаток ниже T. Нерегулярная часть — блочный bootstrap реальных дней того же дня недели
+// (сохраняет среднее, перекос и связь «приход/расход»); при короткой истории — усечённое нормальное с сохранением среднего.
+// Риски реализуются целиком со своей вероятностью; выводы владельцем ограничены остатком над «полом».
+function simulateGapProbability({ days, stats, riskPlans, currentBalance, threshold, runs, seed, cfg }) {
   const rng = createRng(seed);
   const normal = createNormalSampler(rng);
   const horizon = days.length;
   const fixedNet = days.map((d) => d.regularIn + d.scheduledIn - d.regularOut - d.scheduledOut);
   const realized = new Array(riskPlans.length).fill(false);
   const shortfalls = new Float64Array(runs);
-  let gaps = 0;
+  const dangerCounts = new Float64Array(horizon); // в день i остаток ниже T
+  const breachedCounts = new Float64Array(horizon); // к дню i порог уже пробит (накопленно)
+  const owner = stats.ownerWithdrawals;
 
+  const blockLen = cfg.mcBootstrapBlockDays;
+  const daily = stats.daily;
+  const useBootstrap = cfg.mcMode === 'bootstrap' && daily && daily.incomes.length >= cfg.mcBootstrapMinDays;
+  const starts = Array.from({ length: 7 }, () => []); // допустимые начала блоков по дню недели
+  if (useBootstrap) {
+    for (let k = 0; k + blockLen <= daily.incomes.length; k++) starts[weekdayOf(daily.start + k)].push(k);
+  }
+  const normalMu = stats.byWeekday.map((st) => ({
+    income: preserveMean(st.avgIncome, st.stdIncome),
+    expense: preserveMean(st.avgExpense, st.stdExpense)
+  }));
+  const ownerMu = owner ? owner.byWeekday.map((w) => preserveMean(w.avg, w.std)) : null;
+
+  let gaps = 0;
   for (let r = 0; r < runs; r++) {
     for (let k = 0; k < riskPlans.length; k++) realized[k] = rng() < riskPlans[k].probability;
 
     let balance = currentBalance;
     let minBalance = Infinity;
+    let blockStart = 0;
+    let breached = false;
     for (let i = 0; i < horizon; i++) {
-      const st = stats.byWeekday[days[i].weekday];
-      const income = Math.max(0, st.avgIncome + st.stdIncome * normal());
-      const expense = Math.max(0, st.avgExpense + st.stdExpense * normal());
+      const wd = days[i].weekday;
+      let income;
+      let expense;
+      const candidates = useBootstrap ? starts[wd] : null;
+      if (candidates && candidates.length) {
+        if (i % blockLen === 0) blockStart = candidates[Math.floor(rng() * candidates.length)];
+        const j = Math.min(daily.incomes.length - 1, blockStart + (i % blockLen));
+        income = daily.incomes[j];
+        expense = daily.expenses[j];
+      } else {
+        const st = stats.byWeekday[wd];
+        income = Math.max(0, normalMu[wd].income + st.stdIncome * normal());
+        expense = Math.max(0, normalMu[wd].expense + st.stdExpense * normal());
+      }
 
       let loss = 0;
       for (let k = 0; k < riskPlans.length; k++) {
@@ -365,14 +477,31 @@ function simulateGapProbability({ days, stats, riskPlans, currentBalance, thresh
       }
 
       balance += income - expense + fixedNet[i] - loss;
+      if (owner) {
+        const w = owner.byWeekday[wd];
+        const draw = Math.max(0, ownerMu[wd] + w.std * normal());
+        balance -= Math.min(draw, Math.max(0, balance - owner.floor));
+      }
       if (balance < minBalance) minBalance = balance;
+      if (balance < threshold) {
+        dangerCounts[i]++;
+        breached = true;
+      }
+      if (breached) breachedCounts[i]++;
     }
 
     if (minBalance < threshold) gaps++;
     shortfalls[r] = Math.max(0, threshold - minBalance);
   }
 
-  return { probabilityPct: (gaps / runs) * 100, medianShortfall: median(shortfalls) };
+  const sorted = Array.from(shortfalls).sort((a, b) => a - b);
+  return {
+    probabilityPct: (gaps / runs) * 100,
+    medianShortfall: median(shortfalls),
+    p90Shortfall: quantile(sorted, 0.9),
+    dangerProbabilityByDay: Array.from(dangerCounts, (c) => (c / runs) * 100),
+    cumulativeGapProbabilityByDay: Array.from(breachedCounts, (c) => (c / runs) * 100)
+  };
 }
 
 /* ---------------------------------- API ---------------------------------- */
@@ -411,7 +540,7 @@ export function calculateForecast(
   // 3. План по дням: регулярные платежи, будущие операции, риски
   const scheduled = collectScheduledEvents(normalized, options.extraEvents, today, horizon);
   const riskPlans = buildRiskPlans(risks, today, horizon);
-  const days = buildDailyPlan({ today, horizon, regular, scheduled });
+  const days = buildDailyPlan({ today, horizon, regular, scheduled, cfg });
 
   const goodDayThreshold = Number.isFinite(options.goodDayThreshold)
     ? options.goodDayThreshold
@@ -439,7 +568,13 @@ export function calculateForecast(
       reasons.push({ type: 'risk', title: plan.title, amount: -round2(expected) });
     }
 
-    const delta = income - expense - riskLoss;
+    let delta = income - expense - riskLoss;
+    let ownerWithdrawal = 0;
+    if (stats.ownerWithdrawals) {
+      ownerWithdrawal = Math.min(stats.ownerWithdrawals.byWeekday[day.weekday].avg, Math.max(0, balance + delta - stats.ownerWithdrawals.floor));
+      if (ownerWithdrawal > 0) reasons.push({ type: 'owner_withdrawal', title: 'Ожидаемый вывод средств владельцем', amount: -round2(ownerWithdrawal) });
+      delta -= ownerWithdrawal;
+    }
     balance += delta;
     if (balance < minBalance) minBalance = balance;
 
@@ -457,6 +592,7 @@ export function calculateForecast(
       income: round2(income),
       expense: round2(expense),
       riskLoss: round2(riskLoss),
+      ownerWithdrawal: round2(ownerWithdrawal),
       delta: round2(delta),
       isDanger,
       reasons
@@ -480,8 +616,17 @@ export function calculateForecast(
     currentBalance,
     threshold,
     runs: cfg.monteCarloSimulations,
-    seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed
+    seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
+    cfg
   });
+
+  // Дата, к которой разрыв становится вероятным: накопленная вероятность пробоя порога монотонна и заканчивается на gapProbabilityPct, поэтому
+  // дата есть ровно тогда, когда gapProbabilityPct ≥ порога (в отличие от gapDate, считаемого по среднему пути)
+  const probableIdx = monteCarlo.cumulativeGapProbabilityByDay.findIndex((p) => p >= cfg.probableGapThresholdPct);
+  const probableGapDate = probableIdx >= 0 ? forecastSeries[probableIdx].date : null;
+
+  const historyDays = normalized.length ? today - normalized.reduce((m, op) => Math.min(m, op.day), Infinity) + 1 : 0;
+  const dataQuality = assessDataQuality(historyDays, stats, cfg);
 
   // gapAmount — сколько внести в день разрыва, чтобы закрыть разрыв на базовом прогнозе; медиана по прогонам — gapAmountMedian.
   const gapAmount = gapDate ? Math.max(0, threshold - minBalance) : 0;
@@ -491,6 +636,11 @@ export function calculateForecast(
     gapProbabilityPct: Math.round(monteCarlo.probabilityPct * 10) / 10,
     gapAmount: round2(gapAmount),
     gapAmountMedian: round2(monteCarlo.medianShortfall),
+    gapAmountP90: round2(monteCarlo.p90Shortfall),
+    probableGapDate,
+    dangerProbabilityByDay: monteCarlo.dangerProbabilityByDay.map((p) => Math.round(p * 10) / 10),
+    cumulativeGapProbabilityByDay: monteCarlo.cumulativeGapProbabilityByDay.map((p) => Math.round(p * 10) / 10),
+    dataQuality,
     minForecastBalance: round2(minBalance),
     forecastSeries,
     dangerDays: gapDays,
@@ -499,6 +649,20 @@ export function calculateForecast(
     goodDayThreshold: round2(goodDayThreshold),
     regularPayments: regular.map(({ ops, key, ...payment }) => payment)
   };
+}
+
+function assessDataQuality(historyDays, stats, cfg) {
+  const warnings = [];
+  let level = 'high';
+  if (historyDays < cfg.minHistoryDaysLow) {
+    level = 'low';
+    warnings.push(`История короче ${cfg.minHistoryDaysLow} дней — прогноз ориентировочный`);
+  } else if (historyDays < cfg.minHistoryDaysMedium) {
+    level = 'medium';
+    warnings.push('История короче 6 месяцев — сезонность и регулярность оцениваются неточно');
+  }
+  if (stats.ownerWithdrawals) warnings.push('Учтены регулярные выводы средств владельцем (не выше остатка над минимальным уровнем)');
+  return { historyDays, level, warnings };
 }
 
 // События песочницы (ТЗ §5.9): разовый платёж или ежемесячная серия из `repeats`; передаются через options.extraEvents.
