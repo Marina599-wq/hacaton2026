@@ -32,4 +32,4 @@ Scope: four confirmed frontend bugs + TZ gaps (threshold T config, statement tem
 - [x] G6: Figma design applied: dark/gray/green palette + Inter (via CSS) + wireframe structure restyled; tsc/build clean
   CHECK: node client/scripts/verify-design.mjs
   EXPECT: design pass verified
-  EVIDENCE: pending
+  EVIDENCE: manual-evidence=v1; check=node client/scripts/verify-design.mjs; exit=0; output="design pass verified (15/15 checks)"; visual=dev-server+stub-screenshots 390px (home/history/calendar dark verified, no light leftovers); tsc+build clean
