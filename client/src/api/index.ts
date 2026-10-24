@@ -141,8 +141,18 @@ export const api = {
   bank: {
     loan: (body: BankLoanRequest) => http.post<BankLoanResponse>('/bank/loan', body),
     payments: (body: BankPaymentRequest) => http.post<BankPaymentResponse>('/bank/payments', body),
+    /** Синк с банком (заглушка): новые банковские операции записываются в БД. */
+    sync: () => http.post<{ synced: boolean; new: number; operations: Operation[] }>('/bank/sync'),
     transactions: (q: { from: string; to: string }) =>
       http.get<{ operations: Operation[] }>(`/bank/transactions${qs(q)}`),
+    /** Импорт банковской выписки (CSV, формат тестовых данных организаторов или легаси).
+     *  Multipart: file — CSV, replace='true' — заменить ранее импортированные. */
+    importStatement: (file: File, replace: boolean) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('replace', replace ? 'true' : 'false');
+      return http.upload<{ imported: number; skipped: number; removed: number; format: string; companyId: string | null; warnings: string[] }>('/operations/import', fd);
+    },
   },
   sandbox: {
     simulate: (body: SandboxSimulateRequest) =>

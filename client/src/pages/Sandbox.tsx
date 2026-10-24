@@ -147,6 +147,9 @@ export default function Sandbox() {
             </table>
           </div>
           <ScenarioCompareChart base={result.base} scenario={result.scenario} />
+          <p className="mt-2 text-xs text-slate-500">
+            Красные зоны — дни, где остаток сценария ниже порога T (кассовый разрыв).
+          </p>
           <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-800 p-3 text-xs text-slate-400">
             <Info size={14} className="mt-0.5 shrink-0" />
             <span>Данные песочницы не сохраняются в реальные операции и не влияют на основной прогноз.</span>

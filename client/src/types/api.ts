@@ -57,6 +57,10 @@ export interface ForecastResult {
   gapDate: string | null;
   gapProbabilityPct: number; // 0..100
   gapAmount: number;
+  /** Дни, где остаток ниже порога (красные зоны на графиках) */
+  dangerDays?: string[];
+  /** Порог T, по которому считаются dangerDays */
+  threshold?: number;
 }
 
 export type Horizon = 30 | 60 | 90;
