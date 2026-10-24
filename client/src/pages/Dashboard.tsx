@@ -42,7 +42,7 @@ const RISK_TYPES: Array<{ value: RiskType; label: string }> = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [horizon, setHorizon] = useState<Horizon>(90);
+  const [horizon, setHorizon] = useState<Horizon>(30);
   const [showOpModal, setShowOpModal] = useState(false);
   const [showRiskModal, setShowRiskModal] = useState(false);
   const [showLoanModal, setShowLoanModal] = useState(false);

@@ -28,6 +28,12 @@ export default function Payments() {
   const [pullError, setPullError] = useState<string | null>(null);
   const [pulled, setPulled] = useState<Operation[] | null>(null);
 
+  const [file, setFile] = useState<File | null>(null);
+  const [replacePrev, setReplacePrev] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [imported, setImported] = useState<{ imported: number; skipped: number; removed: number; companyId: string | null } | null>(null);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     const value = Number(amount);
@@ -59,12 +65,34 @@ export default function Payments() {
     setPullBusy(true);
     setPullError(null);
     try {
+      // Синк записывает новые банковские операции в БД, затем показываем всю выписку
+      await api.bank.sync();
       const res = await api.bank.transactions({ from: shiftMonth(currentMonth(), -1), to: todayISO() });
       setPulled(res.operations);
     } catch (err) {
       setPullError(errorMessage(err));
     } finally {
       setPullBusy(false);
+    }
+  }
+
+  async function uploadStatement() {
+    if (!file) return;
+    setImportBusy(true);
+    setImportError(null);
+    setImported(null);
+    try {
+      const res = await api.bank.importStatement(file, replacePrev);
+      setImported({ imported: res.imported, skipped: res.skipped, removed: res.removed, companyId: res.companyId });
+      // обновляем список операций из банка
+      const tx = await api.bank.transactions({ from: shiftMonth(currentMonth(), -1), to: todayISO() });
+      setPulled(tx.operations);
+      setFile(null);
+      setReplacePrev(false);
+    } catch (err) {
+      setImportError(errorMessage(err));
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -131,6 +159,44 @@ export default function Payments() {
             )}
           </div>
         )}
+      </Card>
+
+      <Card title="Загрузить выписку из банка">
+        <p className="mb-2 text-xs text-slate-500">
+          CSV выписки (формат тестовых данных или стандартный 7-колоночный). Операции записываются в базу
+          и сразу учитываются в прогнозе, календаре и истории.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-slate-400 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-200 hover:file:bg-slate-600"
+          />
+        </div>
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+          <input
+            type="checkbox"
+            checked={replacePrev}
+            onChange={(e) => setReplacePrev(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800"
+          />
+          Заменить ранее импортированные операции
+        </label>
+        {imported && (
+          <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-400">
+            Импортировано: {imported.imported}
+            {imported.skipped > 0 ? ` (дубли пропущены: ${imported.skipped})` : ''}
+            {imported.removed > 0 ? `, удалено прежних: ${imported.removed}` : ''}
+            {imported.companyId ? ` · компания ${imported.companyId}` : ''}
+          </div>
+        )}
+        {importError && <p className="mt-2 text-xs text-rose-400">{importError}</p>}
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" icon={RefreshCw} loading={importBusy} disabled={!file} onClick={uploadStatement}>
+            Загрузить и записать в БД
+          </Button>
+        </div>
       </Card>
 
       <Card
