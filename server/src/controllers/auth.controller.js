@@ -43,7 +43,7 @@ export async function register(req, res, next) {
 
     const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
 
-    res.status(201).json({ token, user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn } });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn, minBalance: user.minBalance ?? 0 } });
   } catch (err) {
     next(err);
   }
@@ -72,7 +72,8 @@ export async function getMe(req, res, next) {
       where: { id: req.user.userId },
       select: { id: true, email: true, companyName: true, inn: true, minBalance: true }
     });
-    res.json(user);
+    // Контракт: { user: User }
+    res.json({ user });
   } catch (err) {
     next(err);
   }

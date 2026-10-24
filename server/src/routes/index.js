@@ -9,6 +9,7 @@ import sandboxRoutes from './sandbox.routes.js';
 import bankRoutes from './bank.routes.js';
 import supportRoutes from './support.routes.js';
 import historyRoutes from './history.routes.js'; // Убедитесь, что этот файл создан или добавьте ниже
+import userRoutes from './user.routes.js';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/sandbox', sandboxRoutes);
 router.use('/bank', bankRoutes);
 router.use('/support', supportRoutes);
 router.use('/history', historyRoutes);
+router.use('/user', userRoutes);
 
 export default router;

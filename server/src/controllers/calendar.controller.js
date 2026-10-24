@@ -1,12 +1,22 @@
 import { calendarService } from '../services/calendar.service.js';
+import { ApiError } from '../utils/errors.js';
 
 export class CalendarController {
-  async events(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  /**
+   * GET /calendar/events?month=YYYY-MM
+   * Возвращает массив событий месяца в форме CalendarDay контракта:
+   * { date, status: 'danger'|'good'|'neutral', expectedIncome, expectedExpense, expectedBalance, reasons[] }.
+   */
+  async events(req, res, next) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) throw ApiError.unauthorized();
 
-    const events = await calendarService.getEvents(userId);
-    res.json(events);
+      const events = await calendarService.getEvents(userId, req.query.month);
+      res.json(events);
+    } catch (err) {
+      next(err);
+    }
   }
 }
 

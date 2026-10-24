@@ -1,29 +1,49 @@
-import { bankService } from '../services/bank.service.js';
+import { bankService, BankValidationError } from '../services/bank.service.js';
+import { ApiError } from '../utils/errors.js';
+
+function run(handler) {
+  return async (req, res, next) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) throw ApiError.unauthorized();
+      await handler(userId, req, res);
+    } catch (err) {
+      if (err instanceof BankValidationError) return next(ApiError.badRequest(err.message));
+      next(err);
+    }
+  };
+}
 
 export class BankController {
-  async connect(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  connect = run(async (userId, req, res) => {
+    res.json(await bankService.connect(userId, req.body || {}));
+  });
 
-    const result = await bankService.connect(userId, req.body);
-    res.json(result);
-  }
+  sync = run(async (userId, _req, res) => {
+    res.json(await bankService.sync(userId));
+  });
 
-  async sync(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  accounts = run(async (userId, _req, res) => {
+    res.json(await bankService.listAccounts(userId));
+  });
 
-    const result = await bankService.sync(userId);
-    res.json(result);
-  }
+  /** POST /bank/loan { amount, termDays? } — условный займ (заглушка банка). */
+  loan = run(async (userId, req, res) => {
+    const { amount, termDays } = req.body || {};
+    res.json(await bankService.loan(userId, { amount, termDays }));
+  });
 
-  async accounts(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  /** POST /bank/payments { type, recipient, amount, date, purpose } — ожидаемый платёж. */
+  payments = run(async (userId, req, res) => {
+    const { type, recipient, amount, date, purpose } = req.body || {};
+    res.status(201).json(await bankService.payment(userId, { type, recipient, amount, date, purpose }));
+  });
 
-    const accounts = await bankService.listAccounts(userId);
-    res.json(accounts);
-  }
+  /** GET /bank/transactions?from=YYYY-MM-DD&to=YYYY-MM-DD — выписка по счёту. */
+  transactions = run(async (userId, req, res) => {
+    const { from, to } = req.query;
+    res.json(await bankService.transactions(userId, from, to));
+  });
 }
 
 export const bankController = new BankController();

@@ -41,7 +41,7 @@ export async function selfLoan(req, res, next) {
       }
     });
 
-    res.status(201).json(operation);
+    res.status(201).json({ operation });
   } catch (err) {
     next(err);
   }

@@ -32,7 +32,18 @@ export async function getOperations(req, res, next) {
 export async function createOperation(req, res, next) {
   try {
     const userId = req.user.userId;
-    const { date, amount, direction, category, counterpartyName, counterpartyInn, purpose } = req.body;
+    const { date, amount, direction, category, counterpartyName, counterpartyInn, purpose } = req.body || {};
+
+    if (!amount || !direction) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Сумма и направление обязательны' },
+      });
+    }
+    if (!['in', 'out'].includes(direction)) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Направление: in или out' },
+      });
+    }
 
     const { name, inn } = anonymizeCounterparty(counterpartyName, counterpartyInn);
 
@@ -47,10 +58,10 @@ export async function createOperation(req, res, next) {
     const operation = await prisma.operation.create({
       data: {
         userId,
-        date: new Date(date),
+        date: date ? new Date(date) : new Date(),
         amount,
         direction,
-        category,
+        category: category || (direction === 'in' ? 'income' : 'expense'),
         counterpartyName: name,
         counterpartyInn: inn,
         purpose,

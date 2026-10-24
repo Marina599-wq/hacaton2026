@@ -1,20 +1,43 @@
 import { supportService } from '../services/support.service.js';
+import { ApiError } from '../utils/errors.js';
 
 export class SupportController {
-  async createTicket(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  /** POST /support/tickets { subject, kind, message } */
+  async createTicket(req, res, next) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) throw ApiError.unauthorized();
 
-    const ticket = await supportService.createTicket(userId, req.body);
-    res.status(201).json(ticket);
+      const { subject, kind, message } = req.body || {};
+      if (!subject || !kind || !message) {
+        throw ApiError.badRequest('Заполните тему, тип и сообщение обращения');
+      }
+      if (!['problem', 'question'].includes(kind)) {
+        throw ApiError.badRequest('Тип обращения: problem или question');
+      }
+
+      const ticket = await supportService.createTicket(userId, {
+        subject: String(subject).slice(0, 200),
+        kind,
+        message: String(message).slice(0, 2000),
+      });
+      res.status(201).json(ticket);
+    } catch (err) {
+      next(err);
+    }
   }
 
-  async listTickets(req, res) {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  /** GET /support/tickets */
+  async listTickets(req, res, next) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) throw ApiError.unauthorized();
 
-    const tickets = await supportService.listTickets(userId);
-    res.json(tickets);
+      const tickets = await supportService.listTickets(userId);
+      res.json(tickets);
+    } catch (err) {
+      next(err);
+    }
   }
 }
 

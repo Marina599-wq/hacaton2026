@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { PrismaClient } from '@prisma/client';
+import { ApiError } from '../utils/errors.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -9,8 +10,21 @@ router.use(authMiddleware);
 
 router.get('/summary', async (req, res, next) => {
   try {
+    const userId = req.user?.userId;
+    if (!userId) throw new ApiError(401, 'Неавторизован');
+
+    const { month, category } = req.query;
+    const where = { userId };
+    if (category) where.category = category;
+    if (month && /^\d{4}-\d{2}$/.test(String(month))) {
+      const [year, m] = String(month).split('-').map(Number);
+      where.date = {
+        gte: new Date(year, m - 1, 1),
+        lte: new Date(year, m, 0, 23, 59, 59),
+      };
+    }
     const operations = await prisma.operation.findMany({
-      where: { userId: req.user.id },
+      where,
       orderBy: { date: 'desc' },
     });
     res.json({ items: operations });
