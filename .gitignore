@@ -19,3 +19,9 @@ dist/
 .DS_Store
 .vite/
 client/tsconfig.tsbuildinfo
+
+# датасет организаторов (не коммитится, см. ТЗ-доработка WP-1 п. 3)
+test-data/statements/
+coverage/
+*.local
+.unlazy/

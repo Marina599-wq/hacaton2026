@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // В dev запросы /api уходят на бэкенд; адрес можно переопределить в .env
       '/api': {
-        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:3001',
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:5000',
         changeOrigin: true,
       },
     },
