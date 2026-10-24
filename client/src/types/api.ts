@@ -63,7 +63,8 @@ export type Horizon = 30 | 60 | 90;
 
 export interface DashboardResponse {
   balance: number;
-  threshold: number;
+  /** Бэк может не отдавать порог (PATCH /user ещё не реализован) — тогда UI показывает пустое поле. */
+  threshold?: number;
   horizon: number;
   /** Условная ставка банковского займа, % (фиксированная константа из конфига, ТЗ §5.7). Опционально. */
   loanRatePct?: number;

@@ -52,8 +52,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   });
   if (!res.ok) {
     const err = await parseError(res);
-    // истёк или недействителен токен — сбрасываем авторизацию
-    if (res.status === 401) useAuthStore.getState().logout();
+    // 401 от auth- middleware (стандартное тело {error:{code,message}}) — сбрасываем авторизацию.
+    // 401 из локальных контроллеров бэка (тело {error: "Unauthorized"}) — показываем ошибку,
+    // сессию не рвём (баг поля пользователя на стороне бэка, а не истёкший токен).
+    if (res.status === 401 && err.code !== 'HTTP_ERROR') useAuthStore.getState().logout();
     throw err;
   }
   if (res.status === 204) return undefined as T;

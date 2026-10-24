@@ -6,11 +6,12 @@ import type {
   BankLoanResponse,
   BankPaymentRequest,
   BankPaymentResponse,
-  CalendarResponse,
+  CalendarDay,
   CreateOperationRequest,
   CreateRiskRequest,
   CreateTicketRequest,
   DashboardResponse,
+  CalendarResponse,
   HistoryCategory,
   HistorySummary,
   Horizon,
@@ -21,6 +22,7 @@ import type {
   SandboxSimulateResponse,
   SupportTicket,
   User,
+  ForecastPoint,
 } from '@/types/api';
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -30,6 +32,16 @@ function qs(params: Record<string, string | number | undefined>): string {
   if (entries.length === 0) return '';
   return `?${new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()}`;
 }
+
+/** Русские подписи категорий для нормализации бэкенд-сводки (бэк отдаёт категории как ключи). */
+const HISTORY_CATEGORY_LABELS: Record<string, string> = {
+  income: 'Доход',
+  expense: 'Расход',
+  payment: 'Платёж',
+  tax: 'Налоги',
+  salary: 'Зарплата',
+  other: 'Прочее',
+};
 
 export const api = {
   auth: {
@@ -44,16 +56,75 @@ export const api = {
     update: (body: Partial<Pick<User, 'companyName' | 'inn' | 'minBalance'>>) =>
       http.patch<User>('/user', body),
   },
-  dashboard: (horizon: Horizon) => http.get<DashboardResponse>(`/dashboard${qs({ horizon })}`),
+  dashboard: async (horizon: Horizon): Promise<DashboardResponse> => {
+    // Реальный бэк (ветка Backend) отдаёт другой набор полей:
+    // currentBalance / summary.balance / forecastSeries / gapDate… на верхнем уровне.
+    // Нормализуем в контрактную форму; контрактные ключи имеют приоритет,
+    // чтобы и заглушка, и бэк работали без переключения.
+    const d = await http.get<Record<string, unknown>>('/dashboard' + qs({ horizon: String(horizon) }));
+    const summary = (d.summary ?? {}) as Record<string, unknown>;
+    const series = Array.isArray(d.forecastSeries)
+      ? (d.forecastSeries as Array<Record<string, unknown>>).map((p) => ({
+          date: String(p.date ?? ''),
+          income: Number(p.income ?? 0),
+          expense: Number(p.expense ?? 0),
+          balance: Number(p.balance ?? 0),
+        }))
+      : (((d.forecast as Record<string, unknown> | undefined)?.series ?? []) as unknown as ForecastPoint[]);
+    const fc = (d.forecast ?? {}) as Record<string, unknown>;
+    return {
+      balance: Number(d.currentBalance ?? d.balance ?? 0),
+      threshold: typeof d.threshold === 'number' ? d.threshold : undefined,
+      horizon: Number(d.horizon ?? horizon),
+      loanRatePct: typeof d.loanRatePct === 'number' ? d.loanRatePct : undefined,
+      summary: {
+        income: Number(summary.income ?? 0),
+        expense: Number(summary.expense ?? 0),
+        balanceChange: Number(summary.balanceChange ?? summary.balance ?? 0),
+      },
+      forecast: {
+        series,
+        gapDate: (d.gapDate ?? fc.gapDate ?? null) as string | null,
+        gapProbabilityPct: Number(d.gapProbabilityPct ?? fc.gapProbabilityPct ?? 0),
+        gapAmount: Number(d.gapAmount ?? fc.gapAmount ?? 0),
+      },
+      dangerDays: (Array.isArray(d.dangerDays) ? d.dangerDays : []) as string[],
+      goodDays: (Array.isArray(d.goodDays) ? d.goodDays : []) as string[],
+    };
+  },
   operations: {
-    list: (q: { month: string; category?: string; page?: number; limit?: number }) =>
-      http.get<Paged<Operation>>(`/operations${qs({ ...q })}`),
+    // Бэк (ветка Backend) отдаёт «голый» массив, а не Paged — оборачиваем.
+    list: async (q: { month: string; category?: string; page?: number; limit?: number }): Promise<Paged<Operation>> => {
+      const d = await http.get<Operation[] | Paged<Operation>>(`/operations${qs({ ...q })}`);
+      if (Array.isArray(d)) return { items: d, total: d.length, page: q.page ?? 1, pages: 1 };
+      return d;
+    },
     get: (id: string) => http.get<Operation>(`/operations/${id}`),
     create: (body: CreateOperationRequest) => http.post<Operation>('/operations', body),
   },
   history: {
-    summary: (q: { month: string; category?: HistoryCategory | string }) =>
-      http.get<HistorySummary>(`/history/summary${qs({ month: q.month, category: q.category || undefined })}`),
+    // Бэк отдаёт { items: Operation[] } (без month/groups/total) — собираем сводку сами;
+    // контрактная форма {month,total,groups} проходит как есть.
+    summary: async (q: { month: string; category?: HistoryCategory | string }): Promise<HistorySummary> => {
+      const raw = await http.get<HistorySummary | { items?: Operation[] }>(
+        `/history/summary${qs({ month: q.month, category: q.category || undefined })}`,
+      );
+      if (raw && !Array.isArray(raw) && 'groups' in raw) return raw as HistorySummary;
+      const ops = (raw as { items?: Operation[] } | undefined)?.items ?? [];
+      const inMonth = ops.filter((o) => o.date && o.date.slice(0, 7) === q.month);
+      const byCat = new Map<string, number>();
+      inMonth.forEach((o) => byCat.set(o.category, (byCat.get(o.category) ?? 0) + o.amount));
+      const groups = [...byCat.entries()].map(([key, amount]) => ({
+        key,
+        label: HISTORY_CATEGORY_LABELS[key] ?? key,
+        amount,
+      }));
+      return {
+        month: q.month,
+        total: inMonth.reduce((s, o) => s + o.amount, 0),
+        groups,
+      };
+    },
   },
   risks: {
     list: () => http.get<Risk[]>('/risks'),
@@ -78,7 +149,19 @@ export const api = {
       http.post<SandboxSimulateResponse>('/sandbox/simulate', body),
   },
   calendar: {
-    month: (month: string) => http.get<CalendarResponse>(`/calendar${qs({ month })}`),
+    /** Контрактный GET /calendar/month?month=YYYY-MM; ответ нормализуем к контракту. */
+    month: async (month: string): Promise<CalendarResponse> => {
+      const data: unknown = await http.get(`/calendar/month?month=${month}`);
+      const days: CalendarDay[] = Array.isArray(data)
+        ? data.filter(
+            (d): d is CalendarDay =>
+              !!d && typeof d === 'object' && 'date' in d && 'status' in d,
+          )
+        : Array.isArray((data as CalendarResponse | null)?.days)
+          ? (data as CalendarResponse).days
+          : [];
+      return { month, days };
+    },
   },
   support: {
     createTicket: (body: CreateTicketRequest) => http.post<SupportTicket>('/support/tickets', body),

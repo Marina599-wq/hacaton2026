@@ -37,7 +37,7 @@ export default function Calendar() {
   const offset = (first.getDay() + 6) % 7; // понедельник = 0
   const daysInMonth = new Date(year, mon, 0).getDate();
 
-  const byDate = new Map(cal.data?.days.map((day) => [day.date, day]));
+  const byDate = new Map((cal.data?.days ?? []).map((day) => [day.date, day]));
   const cells: Array<string | null> = [
     ...Array.from({ length: offset }, () => null),
     ...Array.from({ length: daysInMonth }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`),

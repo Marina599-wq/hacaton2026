@@ -638,13 +638,13 @@ function SelfLoanForm({
 }
 
 /** Настройка порога разрыва T (ТЗ §14: настраивается пользователем, по умолчанию 0 ₽). */
-function ThresholdEditor({ value, onSaved }: { value: number; onSaved: () => void }) {
-  const [draft, setDraft] = useState(String(value));
+function ThresholdEditor({ value, onSaved }: { value?: number; onSaved: () => void }) {
+  const [draft, setDraft] = useState(String(value ?? ''));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(String(value));
+    setDraft(String(value ?? ''));
   }, [value]);
 
   async function save() {
