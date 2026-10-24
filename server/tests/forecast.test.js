@@ -94,3 +94,30 @@ test('короткая история помечается низкой дост
   assert.throws(() => calculateForecast([], [], NaN, 30, 0, { today: TODAY }), TypeError);
   assert.throws(() => calculateForecast([], [], 1, 0, 0, { today: TODAY }), RangeError);
 });
+test('ЕНП в разных формулировках — один регулярный платёж', () => {
+  const names = ['ЕНП', 'Единый налоговый платеж. НДС не облагается', 'Единый налоговый платёж', 'ЕНП', 'Единый налоговый платеж', 'ЕНП. Без НДС'];
+  const ops = [...background(), ...['04', '05', '06', '07', '08', '09'].map((m, i) => op(`2026-${m}-28`, 100_000 + i * 1_000, 'out', names[i], { inn: '7727400000', name: 'ФНС' }))];
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  assert.equal(r.regularPayments.filter((p) => /налогов|ЕНП/i.test(p.title)).length, 1);
+});
+
+test('зарплата, разбитая на нескольких сотрудников в один день, определяется как один платёж', () => {
+  const ops = [...background()];
+  for (const m of ['04', '05', '06', '07', '08', '09']) for (const k of [1, 2, 3]) ops.push(op(`2026-${m}-15`, 40_000 * k, 'out', 'Заработная плата', { inn: '', name: 'Сотрудник' }));
+  const r = calculateForecast(ops, [], 5_000_000, 30, 0, { today: TODAY });
+  const salary = r.regularPayments.find((p) => p.title.includes('Заработная'));
+  assert.ok(salary && salary.amount === 240_000);
+});
+
+test('недельные выплаты — поток, а не месячный платёж', () => {
+  const ops = [...background()];
+  for (let i = 0; i < 26; i++) ops.push(op(new Date(Date.UTC(2026, 3, 3) + i * 7 * 86_400_000).toISOString().slice(0, 10), 100_000, 'in', 'Выплата маркетплейса', { inn: '555' }));
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  assert.equal(r.regularPayments.filter((p) => p.title.includes('маркетплейса')).length, 0);
+});
+
+test('полосы p10 ≤ p50 ≤ p90 присутствуют в каждой точке и содержат начальный остаток на горизонте 1 дня', () => {
+  const ops = [...background(), ...monthly(10, 50_000, 'Аренда')];
+  const r = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  for (const p of r.forecastSeries) assert.ok(p.balanceLow <= p.balanceMedian && p.balanceMedian <= p.balanceHigh);
+});

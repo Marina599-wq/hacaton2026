@@ -10,6 +10,9 @@ import bankRoutes from './bank.routes.js';
 import supportRoutes from './support.routes.js';
 import historyRoutes from './history.routes.js'; // Убедитесь, что этот файл создан или добавьте ниже
 import userRoutes from './user.routes.js';
+import plannedEventsRoutes from './plannedEvents.routes.js';
+import integrationsRoutes from './integrations.routes.js';
+import counterpartyRoutes from './counterparty.routes.js';
 
 const router = Router();
 
@@ -24,5 +27,8 @@ router.use('/bank', bankRoutes);
 router.use('/support', supportRoutes);
 router.use('/history', historyRoutes);
 router.use('/user', userRoutes);
+router.use('/planned-events', plannedEventsRoutes);
+router.use('/integrations', integrationsRoutes);
+router.use('/counterparty', counterpartyRoutes);
 
 export default router;

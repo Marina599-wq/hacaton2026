@@ -2,6 +2,7 @@
 import { prisma } from '../config/db.js';
 import { calculateForecast } from '../services/forecast.service.js';
 import { FORECAST_CONFIG } from '../config/forecast.config.js';
+import { markOverdueEvents } from './plannedEvents.controller.js';
 
 export async function getDashboard(req, res, next) {
   try {
@@ -17,6 +18,12 @@ export async function getDashboard(req, res, next) {
       where: { userId, active: true }
     });
 
+    // Плановые события (ТЗ-доп.): активные и неоплаченные; детектор просрочки обновляет статусы
+    const plannedEvents = await prisma.plannedEvent.findMany({
+      where: { userId, active: true, status: { not: 'paid' } },
+    });
+    if (plannedEvents.length) await markOverdueEvents(prisma, userId);
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
 
     // Текущий баланс — баланс последней операции или 0
@@ -26,7 +33,9 @@ export async function getDashboard(req, res, next) {
 
     // Рассчитываем прогноз кассовых разрывов (только активные риски)
     const minThreshold = user?.minBalance ?? 0;
-    const forecastResult = calculateForecast(operations, risks, currentBalance, horizon, minThreshold);
+    const forecastResult = calculateForecast(operations, risks, currentBalance, horizon, minThreshold, {
+      plannedEvents, // ТЗ-доп. §4.3: плановые события в расчётном ядре и Монте-Карло
+    });
 
     // Подсчет итогов за последние 30 дней (доход, расход, остаток)
     const now = new Date();
