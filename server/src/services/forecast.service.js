@@ -61,11 +61,15 @@ function normalizeProbability(value) {
 
 const MONTH_NAMES = /(?<![а-яе])(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яе]*/g;
 
-// «Аренда офиса за март 2026» и «аренда офиса за апрель 2026» → один ключ
+// «Аренда офиса за март 2026» и «аренда офиса за апрель 2026» → один ключ.
+// Дополнительно: хвост про НДС отбрасывается, «ЕНП» = «единый налоговый платёж», номера счетов/реестров/договоров не влияют на ключ.
+const VAT_TAIL = /(в\s*т\.?\s*ч\.?|в\s+том\s+числе|без\s+налога|без\s+ндс|ндс|сумма\s)[\s\S]*$/;
 function normalizePurpose(purpose) {
   return String(purpose ?? '')
     .toLowerCase()
     .replace(/ё/g, 'е')
+    .replace(/\bенп\b|единый\s+налоговый\s+плате?ж/g, 'единый налоговый платеж')
+    .replace(VAT_TAIL, ' ')
     .replace(MONTH_NAMES, ' ')
     .replace(/[^а-яеa-z\s]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -161,7 +165,10 @@ function normalizeOperations(operations, cfg) {
   return result;
 }
 
-// Регулярный платёж: тот же контрагент + назначение, повторяющийся день месяца (±допуск) в 3+ из последних 6 месяцев; сумма/день — медианные. Займы не учитываются.
+// Регулярный платёж: тот же контрагент + назначение, повторяющийся день месяца (±допуск) в 3+ из последних 6 месяцев. Займы не учитываются.
+// Улучшения: (1) операции одного ключа за один день суммируются (зарплата по сотрудникам, платёж частями);
+// (2) группы с частым ритмом (недельные выплаты маркетплейсов, ежедневная выручка) — это поток, а не месячный платёж;
+// (3) нужно покрытие месяцев ≥ regularityMinCoverage между первым и последним платежом; (4) сумма — медиана последних N повторений.
 function detectRegularPayments(history, today, cfg) {
   const windowStart = shiftMonths(today, -cfg.regularityWindowMonths);
   const groups = new Map();
@@ -170,33 +177,57 @@ function detectRegularPayments(history, today, cfg) {
     if (op.isFinancing || op.isTransfer || op.isNonOp || op.day < windowStart || op.day > today) continue;
     const purposeKey = normalizePurpose(op.purpose);
     if (!op.inn && !purposeKey) continue;
-    const key = [op.direction, op.inn, op.name, purposeKey].join('|');
+    // ключ без названия контрагента, если ИНН есть: название может писаться по-разному
+    const key = [op.direction, op.inn, op.inn ? '' : op.name, purposeKey].join('|');
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(op);
   }
 
   const regular = [];
   for (const [key, groupOps] of groups) {
-    // Один контрагент может платить в несколько дат (аванс + расчёт) — кластеры по дню месяца
-    for (const ops of clusterByDayOfMonth(groupOps, cfg.regularityToleranceDays)) {
+    // (1) схлопываем операции одного дня
+    const byDay = new Map();
+    for (const op of groupOps) {
+      const e = byDay.get(op.day);
+      if (e) { e.amount += op.amount; e.parts.push(op); }
+      else byDay.set(op.day, { ...op, parts: [op] });
+    }
+    const dayOps = [...byDay.values()].sort((x, y) => x.day - y.day);
+    if (dayOps.length < cfg.regularityMinMonths) continue;
+
+    // (2) частый ритм → поток (медианный интервал между платежами группы)
+    if (cfg.regularityMinMedianGapDays) {
+      const gaps = [];
+      for (let k = 1; k < dayOps.length; k++) gaps.push(dayOps[k].day - dayOps[k - 1].day);
+      if (median(gaps) < cfg.regularityMinMedianGapDays) continue;
+    }
+
+    for (const ops of clusterByDayOfMonth(dayOps, cfg.regularityToleranceDays)) {
       if (ops.length < cfg.regularityMinMonths) continue;
       const medianDay = median(ops.map((op) => op.dom));
       const matching = ops.filter((op) => Math.abs(op.dom - medianDay) <= cfg.regularityToleranceDays);
       const months = new Set(matching.map((op) => op.monthKey));
       if (months.size < cfg.regularityMinMonths) continue;
       if (matching.length / months.size > cfg.regularityMaxOpsPerMonth) continue;
+      // (3) покрытие месяцев между первым и последним платежом
+      const minM = Math.min(...months), maxM = Math.max(...months);
+      if (cfg.regularityMinCoverage && months.size / (maxM - minM + 1) < cfg.regularityMinCoverage) continue;
       // «Протухший» платёж (контрагент перестал платить) не проецируем в будущее
       const lastDay = matching.reduce((max, op) => Math.max(max, op.day), -Infinity);
       if (cfg.regularityMaxStaleDays != null && today - lastDay > cfg.regularityMaxStaleDays) continue;
 
+      // (4) сумма: медиана последних N повторений (отражает актуальный уровень, а не усреднение за полгода)
+      const recent = cfg.regularAmountLastN ? matching.slice(-cfg.regularAmountLastN) : matching;
+      const amounts = matching.map((op) => op.amount);
       regular.push({
         key,
         direction: matching[0].direction,
         dayOfMonth: Math.round(medianDay),
-        amount: round2(median(matching.map((op) => op.amount))),
+        amount: round2(median(recent.map((op) => op.amount))),
         monthsCount: months.size,
         title: matching[0].purpose || matching[0].name || 'Регулярный платёж',
-        ops: matching
+        amounts,
+        ops: matching.flatMap((op) => op.parts)
       });
     }
   }
@@ -293,8 +324,8 @@ function calculateOwnerWithdrawals(history, windowStart, windowDays, today, cfg,
   return { byWeekday, floor: quantile(balances, cfg.ownerWithdrawalsFloorQuantile) };
 }
 
-// Будущие операции (в т. ч. займы) и события песочницы, разложенные по дням горизонта.
-function collectScheduledEvents(normalized, extraEvents, today, horizon) {
+// Будущие операции (в т. ч. займы), события песочницы и плановые события (ТЗ-доп. §4.3), разложенные по дням горизонта.
+function collectScheduledEvents(normalized, extraEvents, today, horizon, plannedEvents, cfg) {
   const byDay = Array.from({ length: horizon }, () => []);
 
   for (const op of normalized) {
@@ -322,7 +353,35 @@ function collectScheduledEvents(normalized, extraEvents, today, horizon) {
       title: ev.title || ev.name || 'Сценарий'
     });
   }
-  return byDay;
+
+  // Плановые события: только активные и неоплаченные; просроченные переносим на today + N (ТЗ-доп. §4.1 Б)
+  const plannedInEvents = [];
+  for (const ev of plannedEvents ?? []) {
+    if (!ev || ev.active === false || ev.status === 'paid') continue;
+    let day = toDayIndex(ev.expectedDate);
+    if (day === null) continue;
+    if (ev.status === 'overdue') day = today + cfg.plannedOverdueShiftDays;
+    const amount = Math.abs(Number(ev.amount));
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    const direction = ev.direction === 'in' ? 'in' : 'out';
+    if (direction === 'in') {
+      plannedInEvents.push({
+        day,
+        amount,
+        delayProb: ev.counterpartyRisk === 'high' ? cfg.plannedDelayProbHigh
+          : ev.counterpartyRisk === 'medium' ? cfg.plannedDelayProbMedium : 0
+      });
+    }
+    const i = day - today - 1;
+    if (i < 0 || i >= horizon) continue;
+    byDay[i].push({
+      kind: 'planned',
+      direction,
+      amount,
+      title: ev.title || 'Запланированный платёж'
+    });
+  }
+  return { byDay, plannedInEvents };
 }
 
 // Активные риски: сумма на весь период равномерно распределяется по дням и умножается на вероятность.
@@ -383,6 +442,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
       scheduledIn: 0,
       scheduledOut: 0,
       operatingIn: 0, // доход без займов — для «хороших» дней
+      regularEvents: [], // для Монте-Карло: сумма берётся из реальных повторений платежа
       reasons: []
     };
 
@@ -397,6 +457,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
         day.regularOut += pay.amount;
       }
       day.reasons.push({ type: 'regular', title: pay.title, amount: signed });
+      day.regularEvents.push({ sign: pay.direction === 'in' ? 1 : -1, amounts: pay.amounts });
     }
 
     for (const ev of scheduled[i]) {
@@ -422,11 +483,18 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
 // Монте-Карло (ТЗ §6.3): доля прогонов, где остаток ниже T. Нерегулярная часть — блочный bootstrap реальных дней того же дня недели
 // (сохраняет среднее, перекос и связь «приход/расход»); при короткой истории — усечённое нормальное с сохранением среднего.
 // Риски реализуются целиком со своей вероятностью; выводы владельцем ограничены остатком над «полом».
-function simulateGapProbability({ days, stats, riskPlans, currentBalance, threshold, runs, seed, cfg }) {
+function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], currentBalance, threshold, runs, seed, cfg }) {
   const rng = createRng(seed);
   const normal = createNormalSampler(rng);
   const horizon = days.length;
-  const fixedNet = days.map((d) => d.regularIn + d.scheduledIn - d.regularOut - d.scheduledOut);
+  const schedNet = days.map((d) => d.scheduledIn - d.scheduledOut);
+  // Задержки входящих плановых платежей (ТЗ-доп. §4.3): в прогоне с вероятностью delayProb деньги поступают не на дату,
+  // а на дату + N дней (high-контрагент не успевает к списанию ЕНП на 28-е → разрыв фиксируется)
+  const firstDayIdx = days.length ? toDayIndex(days[0].date) : 0;
+  const delayEvents = plannedInEvents
+    .filter((e) => e.delayProb > 0 && e.day >= firstDayIdx && e.day < firstDayIdx + horizon)
+    .map((e) => ({ i: e.day - firstDayIdx, amount: e.amount, p: e.delayProb, laterI: e.day + cfg.plannedDelayDays - firstDayIdx }));
+  const paths = new Float64Array(runs * horizon);
   const realized = new Array(riskPlans.length).fill(false);
   const shortfalls = new Float64Array(runs);
   const dangerCounts = new Float64Array(horizon); // в день i остаток ниже T
@@ -454,6 +522,8 @@ function simulateGapProbability({ days, stats, riskPlans, currentBalance, thresh
     let minBalance = Infinity;
     let blockStart = 0;
     let breached = false;
+    // на прогон: какие входящие плановые платежи задерживаются (решение в начале, чтобы rng-поток был стабильным)
+    const delayed = delayEvents.map((e) => rng() < e.p);
     for (let i = 0; i < horizon; i++) {
       const wd = days[i].weekday;
       let income;
@@ -476,12 +546,30 @@ function simulateGapProbability({ days, stats, riskPlans, currentBalance, thresh
         if (realized[k] && i >= plan.startI && i <= plan.endI) loss += plan.dailyAmount;
       }
 
-      balance += income - expense + fixedNet[i] - loss;
+      let regNet = 0;
+      for (const ev of days[i].regularEvents) {
+        // сумма регулярного платежа — случайное из реальных повторений (учёт разброса, напр. ЕНП)
+        const amt = cfg.mcResampleRegularAmounts && ev.amounts?.length > 1 ? ev.amounts[Math.floor(rng() * ev.amounts.length)] : ev.amounts[ev.amounts.length - 1];
+        regNet += ev.sign * amt;
+      }
+
+      // корректировка на задержанные/поступившие позже плановые входящие
+      let plannedAdjust = 0;
+      for (let k = 0; k < delayEvents.length; k++) {
+        const e = delayEvents[k];
+        if (delayed[k]) {
+          if (i === e.i) plannedAdjust -= e.amount; // на дату не поступили
+          if (i === e.laterI && e.laterI < horizon) plannedAdjust += e.amount; // поступили с задержкой
+        }
+      }
+
+      balance += income - expense + schedNet[i] + regNet - loss + plannedAdjust;
       if (owner) {
         const w = owner.byWeekday[wd];
         const draw = Math.max(0, ownerMu[wd] + w.std * normal());
         balance -= Math.min(draw, Math.max(0, balance - owner.floor));
       }
+      paths[r * horizon + i] = balance;
       if (balance < minBalance) minBalance = balance;
       if (balance < threshold) {
         dangerCounts[i]++;
@@ -495,7 +583,17 @@ function simulateGapProbability({ days, stats, riskPlans, currentBalance, thresh
   }
 
   const sorted = Array.from(shortfalls).sort((a, b) => a - b);
+  const band = { low: [], mid: [], high: [] };
+  const col = new Float64Array(runs);
+  for (let i = 0; i < horizon; i++) {
+    for (let r = 0; r < runs; r++) col[r] = paths[r * horizon + i];
+    const sc = Array.from(col).sort((a, b) => a - b);
+    band.low.push(quantile(sc, cfg.bandLowQuantile));
+    band.mid.push(quantile(sc, 0.5));
+    band.high.push(quantile(sc, cfg.bandHighQuantile));
+  }
   return {
+    band,
     probabilityPct: (gaps / runs) * 100,
     medianShortfall: median(shortfalls),
     p90Shortfall: quantile(sorted, 0.9),
@@ -530,21 +628,43 @@ export function calculateForecast(
 
   const today = resolveToday(options.today);
   const normalized = normalizeOperations(operations, cfg);
-  const history = normalized.filter((op) => op.day <= today);
+  let history = normalized.filter((op) => op.day <= today);
+
+  // Дедупликация налогов (ТЗ-доп. §4.3): если активны события tax из налогового календаря,
+  // исторические операции category === "tax" исключаются — налог учтён по точному расчёту, а не дважды
+  const plannedEvents = (options.plannedEvents ?? []).filter((e) => e && e.active !== false && e.status !== 'paid');
+  if (plannedEvents.some((e) => e.type === 'tax')) {
+    history = history.filter((op) => op.category !== 'tax');
+  }
 
   // 1–2. Регулярная и нерегулярная части
   const regular = detectRegularPayments(history, today, cfg);
   const regularOps = new Set(regular.flatMap((payment) => payment.ops));
   const stats = calculateWeekdayStats(history, regularOps, today, cfg);
 
-  // 3. План по дням: регулярные платежи, будущие операции, риски
-  const scheduled = collectScheduledEvents(normalized, options.extraEvents, today, horizon);
+  // 3. План по дням: регулярные платежи, будущие операции, риски, плановые события
+  const { byDay: scheduled, plannedInEvents } = collectScheduledEvents(normalized, options.extraEvents, today, horizon, plannedEvents, cfg);
   const riskPlans = buildRiskPlans(risks, today, horizon);
   const days = buildDailyPlan({ today, horizon, regular, scheduled, cfg });
 
   const goodDayThreshold = Number.isFinite(options.goodDayThreshold)
     ? options.goodDayThreshold
     : stats.avgDailyIncome * cfg.goodDayMultiplier;
+
+  // Вероятность разрыва и полосы неопределённости (считаются до сборки ряда, чтобы вписать p10/p90 в каждую точку)
+  const monteCarlo = simulateGapProbability({
+    days,
+    stats,
+    riskPlans,
+    plannedInEvents,
+    currentBalance,
+    threshold,
+    runs: cfg.monteCarloSimulations,
+    seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
+    cfg
+  });
+
+  const monteCarloBand = monteCarlo.band;
 
   // 4. Базовый прогноз: B(d) = B(d−1) + Δ(d)
   const forecastSeries = [];
@@ -594,6 +714,9 @@ export function calculateForecast(
       riskLoss: round2(riskLoss),
       ownerWithdrawal: round2(ownerWithdrawal),
       delta: round2(delta),
+      balanceLow: round2(monteCarloBand.low[i]),
+      balanceMedian: round2(monteCarloBand.mid[i]),
+      balanceHigh: round2(monteCarloBand.high[i]),
       isDanger,
       reasons
     });
@@ -607,18 +730,6 @@ export function calculateForecast(
     .slice(0, cfg.outflowPeakDaysCount)
     .map((point) => point.date)
     .sort();
-
-  // 5. Вероятность и сумма разрыва
-  const monteCarlo = simulateGapProbability({
-    days,
-    stats,
-    riskPlans,
-    currentBalance,
-    threshold,
-    runs: cfg.monteCarloSimulations,
-    seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
-    cfg
-  });
 
   // Дата, к которой разрыв становится вероятным: накопленная вероятность пробоя порога монотонна и заканчивается на gapProbabilityPct, поэтому
   // дата есть ровно тогда, когда gapProbabilityPct ≥ порога (в отличие от gapDate, считаемого по среднему пути)

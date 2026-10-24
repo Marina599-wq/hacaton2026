@@ -20,6 +20,7 @@ model User {
   risks        Risk[]
   tickets      SupportTicket[]
   scenarios    SandboxScenario[]
+  plannedEvents PlannedEvent[]
 }
 
 model Operation {
@@ -65,6 +66,29 @@ model SupportTicket {
   message   String
   status    String   @default("new")
   createdAt DateTime @default(now())
+}
+
+model PlannedEvent {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  type             String            // "contract" | "invoice" | "tax"
+  title            String
+  amount           Float             // строго > 0
+  direction        String            // "in" | "out"
+  expectedDate     DateTime
+  issueDate        DateTime?
+  deferralDays     Int      @default(0)
+  prepaymentPct    Float?
+  counterpartyName String?
+  counterpartyInn  String?
+  counterpartyRisk String   @default("low")
+  source           String            // "1c" | "edo" | "ofd" | "marketplace" | "tax_calendar" | "manual"
+  status           String   @default("pending")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  @@index([userId, expectedDate])
 }
 
 model SandboxScenario {
