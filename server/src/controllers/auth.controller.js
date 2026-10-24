@@ -6,57 +6,102 @@ import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { generateDemoTransactions } from '../../prisma/seed/demo-data.js';
-import { parseBankStatement } from '../utils/parser.js';
+import { parseBankStatement, buildImportSummary } from '../utils/parser.js';
+import { categorizeStatement } from '../services/categorizer.service.js';
+import { getAsOfDate } from '../utils/asOf.js';
 import { anonymizeCounterparty } from '../utils/anonymizer.js';
 
+/**
+ * Регистрация (ТЗ-доработка WP-7 §1: «parse before write»).
+ * Порядок: 1) проверка email/пароля, 2) разбор файла ДО каких-либо записей
+ * (при ошибке разбора — 422, пользователь не создаётся), 3) user + operations
+ * в одной транзакции (createMany батчами по 500).
+ */
 export async function register(req, res, next) {
   try {
-    const { email, password, companyName, inn, useDemoData } = req.body;
+    const { email, password, companyName, inn, minBalance, useDemoData } = req.body || {};
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       throw ApiError.badRequest('Пользователь с таким email уже существует');
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { email, passwordHash, companyName, inn }
-    });
-
+    // 1) Разбор файла — до создания пользователя (422 → user не появляется).
+    let parsed = null;
+    let demoTx = null;
     if (useDemoData === 'true' || useDemoData === true) {
-      const { transactions } = generateDemoTransactions();
-      await prisma.operation.createMany({
-        data: transactions.map(tx => ({ ...tx, userId: user.id }))
-      });
+      demoTx = generateDemoTransactions();
     } else if (req.file) {
-      const { operations: rawOps, meta, warnings } = await parseBankStatement(req.file.buffer, req.file.originalname);
-      // Данные организаторов (test-data/*.csv) уже обезличены на источнике — маскируем только легаси-выписки
-      const opsToCreate = rawOps.map(op => {
-        const { name, inn: mInn } = meta.format === 'organizer'
-          ? { name: op.counterpartyName, mInn: 0 }
-          : anonymizeCounterparty(op.counterpartyName, op.counterpartyInn);
-        const { companyId, ...rest } = op;
-        return {
-          ...rest,
-          counterpartyName: meta.format === 'organizer' ? name : name,
-          counterpartyInn: meta.format === 'organizer' ? op.counterpartyInn : mInn,
-          userId: user.id,
-          source: 'import'
-        };
-      });
-      await prisma.operation.createMany({ data: opsToCreate });
-      // warnings не бросаем — часть строк может быть некорректной в реальной выгрузке
-      // Строка про импорт — без имени файла: только число строк, пропущенных и предупреждений.
-      logger.info('import', { lines: opsToCreate.length, skipped: meta.rowsSkipped, warnings: warnings.length });
+      parsed = await parseBankStatement(req.file.buffer, req.file.originalname, inn || null);
+      if (parsed.operations.length === 0 && parsed.meta.format !== 'empty') {
+        throw ApiError.badRequest('В файле не найдено корректных операций выписки');
+      }
     }
 
+    const passwordHash = await bcrypt.hash(password, 10);
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { email },
       env.JWT_SECRET,
-      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN }
+      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN },
     );
 
-    res.status(201).json({ token, user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn, minBalance: user.minBalance ?? 0 } });
+    // 2) user + operations — одна транзакция (частичное состояние недопустимо).
+    const user = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.create({
+        data: { email, passwordHash, companyName, inn, minBalance },
+      });
+
+      if (demoTx) {
+        // Демо-генератор: опережающая категоризация (WP-3), без userInn (у демки ИНН из формы).
+        const ops = categorizeStatement(
+          demoTx.transactions.map((t) => ({ ...t, source: 'demo' })),
+          inn || null,
+        ).map((t) => ({ ...t, userId: u.id }));
+        for (let i = 0; i < ops.length; i += 500) {
+          await tx.operation.createMany({ data: ops.slice(i, i + 500) });
+        }
+      } else if (parsed) {
+        // Данные организаторов (test-data/*.csv) обезличены на источнике;
+        // реальные легаси-выписки маскируем.
+        const opsToCreate = parsed.operations.map((op) => {
+          const { name, inn: mInn } =
+            parsed.meta.format === 'organizer'
+              ? { name: op.counterpartyName ?? 'Не указан', mInn: op.counterpartyInn ?? '' }
+              : anonymizeCounterparty(op.counterpartyName, op.counterpartyInn);
+          const { companyId, categorizeRule, ...rest } = op;
+          return {
+            ...rest,
+            counterpartyName: name,
+            counterpartyInn: parsed.meta.format === 'organizer' ? op.counterpartyInn : mInn,
+            userId: u.id,
+            source: 'import',
+          };
+        });
+        for (let i = 0; i < opsToCreate.length; i += 500) {
+          await tx.operation.createMany({ data: opsToCreate.slice(i, i + 500) });
+        }
+      }
+      return u;
+    });
+
+    // ТЗ-доработка WP-7 §5: итог импорта — строки, импортировано, пропущено, дубли, предупреждения.
+    let importSummary = null;
+    if (parsed) {
+      importSummary = buildImportSummary({
+        rowsTotal: parsed.meta.rowsTotal,
+        operations: parsed.operations,
+        duplicatesRemoved: parsed.meta.duplicatesRemoved,
+        possibleDuplicates: parsed.meta.possibleDuplicates,
+        rowErrors: parsed.rowErrors,
+      });
+      logger.info('import', { lines: parsed.operations.length, skipped: parsed.meta.rowsSkipped, warnings: parsed.warnings.length });
+    }
+
+    res.status(201).json({
+      token,
+      user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn, minBalance: user.minBalance ?? 0 },
+      ...(importSummary ? { import: importSummary } : {}),
+    });
   } catch (err) {
     next(err);
   }

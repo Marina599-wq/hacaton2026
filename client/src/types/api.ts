@@ -7,6 +7,10 @@ export type Direction = 'in' | 'out';
 
 export type OperationCategory = 'income' | 'expense' | 'payment' | 'tax' | 'salary' | 'other';
 export type OperationSource = 'import' | 'manual' | 'bank_stub' | 'self_loan' | 'bank_loan' | 'payment';
+export type Subcategory =
+  | 'salary' | 'tax' | 'rent' | 'loan' | 'insur' | 'supp'
+  | 'self_loan' | 'bank_loan' | 'payment' | 'expense' | 'income' | 'refund_in' | 'refund_out';
+export type CategoryConfidence = 'high' | 'medium' | 'low' | 'manual' | 'unclassified';
 
 export interface Operation {
   id: string;
@@ -14,6 +18,8 @@ export interface Operation {
   amount: number; // всегда положительное число
   direction: Direction;
   category: OperationCategory;
+  subcategory?: Subcategory | null; // ТЗ-доработка WP-3; null — не категоризовано
+  confidence?: CategoryConfidence;
   counterpartyName: string; // обезличено: первые 2 символа + ***
   counterpartyInn: string; // обезличено: 77******12
   purpose: string;
@@ -186,6 +192,18 @@ export interface CreateOperationRequest {
   counterpartyName?: string;
   purpose: string;
   category?: OperationCategory;
+  subcategory?: Subcategory | ''; // '' — сбросить (не категоризовано)
+}
+
+/** Итог импорта выписки (ТЗ-доработка WP-7 §5). */
+export interface ImportSummary {
+  rowsTotal: number;
+  imported: number;
+  skipped: number;
+  duplicatesRemoved: number;
+  possibleDuplicates: number;
+  warnings: string[];
+  dataQuality: Record<string, unknown>;
 }
 
 export interface SupportTicket {
@@ -211,6 +229,9 @@ export interface SandboxSimulateRequest {
   date: string;
   direction: SandboxDirection;
   repeats: number; // 1 = одноразово, N = ежемесячно N раз
+  /** ТЗ-доработка WP-4: отрицательные сценарии «что, если» */
+  excludeLoans?: boolean; // займ не получен
+  excludeClientPayments?: boolean; // оплата от клиента не получена
 }
 
 export interface SandboxSimulateResponse {
@@ -221,6 +242,48 @@ export interface SandboxSimulateResponse {
     gapProbabilityPct: number;
     gapAmount: number;
   };
+  /** Сколько плановых поступлений выключено отрицательным сценарием */
+  excludedEvents?: number;
+}
+
+/** Каталог категорий и подкатегорий (ТЗ-доработка §2.1). */
+export interface SubcategoryInfo {
+  id: Subcategory;
+  label: string;
+  direction: Direction;
+}
+
+export interface CategoryInfo {
+  id: OperationCategory | 'unclassified';
+  label: string;
+  subcategoryIds: Subcategory[];
+}
+
+export interface CategoriesResponse {
+  categories: CategoryInfo[];
+  subcategories: SubcategoryInfo[];
+}
+
+/** Вкладка «План-факт» (ТЗ-доработка WP-5). */
+export interface PlanFactGroup {
+  key: string;
+  label: string;
+  planned: number;
+  actual: number;
+  delta: number;
+}
+
+export interface PlanFactResponse {
+  month: string;
+  total: {
+    plannedIn: number;
+    actualIn: number;
+    plannedOut: number;
+    actualOut: number;
+    deltaIn: number;
+    deltaOut: number;
+  };
+  groups: PlanFactGroup[];
 }
 
 export type DayStatus = 'danger' | 'good' | 'neutral';

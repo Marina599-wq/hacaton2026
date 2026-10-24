@@ -31,18 +31,34 @@ export default function History() {
   const navigate = useNavigate();
   const [month, setMonth] = useState(currentMonth());
   const [category, setCategory] = useState<HistoryCategory>('');
+  // ТЗ-доработка WP-3: фильтр «Не категоризовано»
+  const [uncategorized, setUncategorized] = useState(false);
   const [page, setPage] = useState(1);
   const [slideDir, setSlideDir] = useState<'next' | 'prev' | null>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
   const summary = useAsync(() => api.history.summary({ month, category }), [month, category]);
   const ops = useAsync(
-    () => api.operations.list({ month, category: category || undefined, page, limit: LIMIT }),
-    [month, category, page],
+    () =>
+      api.operations.list({
+        month,
+        category: category || undefined,
+        uncategorized: uncategorized || undefined,
+        page,
+        limit: LIMIT,
+      }),
+    [month, category, uncategorized, page],
   );
 
   function changeCategory(c: HistoryCategory) {
     setCategory(c);
+    setUncategorized(false);
+    setPage(1);
+  }
+
+  function toggleUncategorized() {
+    setUncategorized((v) => !v);
+    setCategory('');
     setPage(1);
   }
 
@@ -94,7 +110,7 @@ export default function History() {
               onClick={() => changeCategory(c.value)}
               className={cn(
                 'rounded-full border px-3 py-1 text-xs font-medium',
-                category === c.value
+                category === c.value && !uncategorized
                   ? 'border-emerald-500 bg-emerald-500 text-slate-950'
                   : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600',
               )}
@@ -102,6 +118,19 @@ export default function History() {
               {c.label}
             </button>
           ))}
+          {/* ТЗ-доработка WP-3: фильтр «Не категоризовано» */}
+          <button
+            type="button"
+            onClick={toggleUncategorized}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium',
+              uncategorized
+                ? 'border-amber-500 bg-amber-500 text-slate-950'
+                : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600',
+            )}
+          >
+            Не категоризовано
+          </button>
         </div>
       </div>
 

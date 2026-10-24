@@ -7,6 +7,7 @@ import type {
   BankPaymentRequest,
   BankPaymentResponse,
   CalendarDay,
+  CategoriesResponse,
   CreateOperationRequest,
   CreatePlannedEventRequest,
   CreateRiskRequest,
@@ -17,16 +18,19 @@ import type {
   HistoryCategory,
   HistorySummary,
   Horizon,
+  ImportSummary,
   IntegrationProvider,
   IntegrationSyncResult,
   Operation,
   Paged,
   PlannedEvent,
   PlannedEventsResponse,
+  PlanFactResponse,
   Risk,
   SandboxSimulateRequest,
   SandboxSimulateResponse,
   SupportTicket,
+  Subcategory,
   User,
   ForecastPoint,
 } from '@/types/api';
@@ -98,15 +102,30 @@ export const api = {
       goodDays: (Array.isArray(d.goodDays) ? d.goodDays : []) as string[],
     };
   },
+  planFact: {
+    /** Вкладка «План-факт» (ТЗ-доработка WP-5). */
+    month: (month?: string) =>
+      http.get<PlanFactResponse>(`/dashboard/plan-fact${qs({ month: month || undefined })}`),
+  },
+  categories: {
+    /** Каталог категорий и подкатегорий (ТЗ-доработка §2.1). */
+    list: () => http.get<CategoriesResponse>('/categories'),
+  },
   operations: {
     // Бэк (ветка Backend) отдаёт «голый» массив, а не Paged — оборачиваем.
-    list: async (q: { month: string; category?: string; page?: number; limit?: number }): Promise<Paged<Operation>> => {
-      const d = await http.get<Operation[] | Paged<Operation>>(`/operations${qs({ ...q })}`);
+    list: async (q: { month: string; category?: string; page?: number; limit?: number; uncategorized?: boolean }): Promise<Paged<Operation>> => {
+      const d = await http.get<Operation[] | Paged<Operation>>(`/operations${qs({ ...q, uncategorized: q.uncategorized ? 'true' : undefined })}`);
       if (Array.isArray(d)) return { items: d, total: d.length, page: q.page ?? 1, pages: 1 };
       return d;
     },
     get: (id: string) => http.get<Operation>(`/operations/${id}`),
     create: (body: CreateOperationRequest) => http.post<Operation>('/operations', body),
+    /** Перекатегоризация (ТЗ-доработка §2.3): subcategory='' — сброс; без operationIds — все операции пользователя. */
+    reassign: (body: { subcategory: Subcategory | ''; operationIds?: string[] }) =>
+      http.post<{ updated: number }>('/operations/reassign', body),
+    /** Пакетный импорт операций (ТЗ-доработка WP-7). */
+    bulk: (body: { operations: Array<Record<string, unknown>> }) =>
+      http.post<{ imported: number; asOf: string }>('/operations/bulk', body),
   },
   history: {
     // Бэк отдаёт { items: Operation[] } (без month/groups/total) — собираем сводку сами;
@@ -151,13 +170,14 @@ export const api = {
     sync: () => http.post<{ synced: boolean; new: number; operations: Operation[] }>('/bank/sync'),
     transactions: (q: { from: string; to: string }) =>
       http.get<{ operations: Operation[] }>(`/bank/transactions${qs(q)}`),
-    /** Импорт банковской выписки (CSV, формат тестовых данных организаторов или легаси).
-     *  Multipart: file — CSV, replace='true' — заменить ранее импортированные. */
+    /** Импорт банковской выписки (CSV/XLSX, формат тестовых данных организаторов или легаси).
+     *  Multipart: file — выписка, replace='true' — заменить ранее импортированные.
+     *  Итог импорта — ImportSummary (ТЗ-доработка WP-7 §5). */
     importStatement: (file: File, replace: boolean) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('replace', replace ? 'true' : 'false');
-      return http.upload<{ imported: number; skipped: number; removed: number; format: string; companyId: string | null; warnings: string[] }>('/operations/import', fd);
+      return http.upload<ImportSummary & { removed: number; format: string; companyId: string | null }>('/operations/import', fd);
     },
   },
   sandbox: {

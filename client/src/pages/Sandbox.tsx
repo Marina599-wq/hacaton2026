@@ -13,6 +13,9 @@ export default function Sandbox() {
   const [date, setDate] = useState(todayISO());
   const [direction, setDirection] = useState<SandboxDirection>('out');
   const [repeats, setRepeats] = useState('1');
+  // ТЗ-доработка WP-4: отрицательные сценарии «что, если»
+  const [excludeLoans, setExcludeLoans] = useState(false);
+  const [excludeClientPayments, setExcludeClientPayments] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SandboxSimulateResponse | null>(null);
@@ -43,6 +46,8 @@ export default function Sandbox() {
           date,
           direction,
           repeats: rep,
+          excludeLoans,
+          excludeClientPayments,
         }),
       );
     } catch (err) {
@@ -88,6 +93,32 @@ export default function Sandbox() {
           <Field label="Повторение" hint="1 — одноразово, N — ежемесячно N раз">
             <Input type="number" min="1" step="1" value={repeats} onChange={(e) => setRepeats(e.target.value)} />
           </Field>
+          {/* ТЗ-доработка WP-4: отрицательные сценарии «что, если» */}
+          <div className="rounded-lg bg-slate-800/60 p-3 sm:col-span-2">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+              Отрицательные сценарии «что, если»
+            </p>
+            <div className="flex flex-wrap gap-4 text-sm text-slate-300">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={excludeLoans}
+                  onChange={(e) => setExcludeLoans(e.target.checked)}
+                  className="h-4 w-4 accent-emerald-500"
+                />
+                Займ не получен (плановые поступления по кредитам/займам не приходят)
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={excludeClientPayments}
+                  onChange={(e) => setExcludeClientPayments(e.target.checked)}
+                  className="h-4 w-4 accent-emerald-500"
+                />
+                Оплата от клиента не получена (плановые оплаты по договорам/счётам не приходят)
+              </label>
+            </div>
+          </div>
           <div className="sm:col-span-2 sm:flex sm:justify-end">
             <Button type="submit" loading={busy} className="w-full sm:w-56">
               Рассчитать сценарий
@@ -152,7 +183,10 @@ export default function Sandbox() {
           </p>
           <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-800 p-3 text-xs text-slate-400">
             <Info size={14} className="mt-0.5 shrink-0" />
-            <span>Данные песочницы не сохраняются в реальные операции и не влияют на основной прогноз.</span>
+            <span>
+              Данные песочницы не сохраняются в реальные операции и не влияют на основной прогноз.
+              {result.excludedEvents ? ` Отрицательным сценарием выключено плановых поступлений: ${result.excludedEvents}.` : ''}
+            </span>
           </div>
         </Card>
       )}

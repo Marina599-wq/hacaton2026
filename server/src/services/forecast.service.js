@@ -3,6 +3,9 @@
 // Даты — календарные дни UTC; «сегодня» = options.today; прогноз со завтрашнего дня;
 // операции с будущими датами (в т. ч. займы) считаются запланированными событиями.
 import { FORECAST_CONFIG } from '../config/forecast.config.js';
+import { findGaps } from '../utils/dataQuality.js';
+// ТЗ-доработка WP-3 п.6: normalizePurpose вынесен в utils/text.js
+import { normalizePurpose } from '../utils/text.js';
 
 const DAY_MS = 86_400_000;
 const FINANCING_SOURCES = new Set(['self_loan', 'bank_loan']);
@@ -59,22 +62,7 @@ function normalizeProbability(value) {
   return Math.min(n > 1 ? n / 100 : n, 1); // допускаем и 0..1, и 0..100
 }
 
-const MONTH_NAMES = /(?<![а-яе])(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яе]*/g;
-
 // «Аренда офиса за март 2026» и «аренда офиса за апрель 2026» → один ключ.
-// Дополнительно: хвост про НДС отбрасывается, «ЕНП» = «единый налоговый платёж», номера счетов/реестров/договоров не влияют на ключ.
-const VAT_TAIL = /(в\s*т\.?\s*ч\.?|в\s+том\s+числе|без\s+налога|без\s+ндс|ндс|сумма\s)[\s\S]*$/;
-function normalizePurpose(purpose) {
-  return String(purpose ?? '')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/\bенп\b|единый\s+налоговый\s+плате?ж/g, 'единый налоговый платеж')
-    .replace(VAT_TAIL, ' ')
-    .replace(MONTH_NAMES, ' ')
-    .replace(/[^а-яеa-z\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /* ------------- усечённое нормальное распределение с сохранением среднего ------------- */
 
@@ -159,7 +147,10 @@ function normalizeOperations(operations, cfg) {
       // разовые нерабочие поступления/списания (заём учредителя, уставный капитал, исполнительный лист, обеспечительный платёж) не должны попадать в статистику
       isNonOp: Boolean(cfg.nonOperatingPattern && cfg.nonOperatingPattern.test(op.purpose ?? '')),
       // переводы между своими счетами — не доход и не расход, но выводы владельцем моделируются отдельно (см. ownerWithdrawals)
-      isTransfer: Boolean(cfg.excludeInternalTransfers && cfg.internalTransferPattern.test(op.purpose ?? ''))
+      isTransfer: Boolean(cfg.excludeInternalTransfers && cfg.internalTransferPattern.test(op.purpose ?? '')),
+      // возвраты ошибочных платежей (ТЗ-доработка WP-7 §12): не попадают в регулярную и нерегулярную статистику
+      subcategory: op.subcategory ?? null,
+      isRefund: op.subcategory === 'refund_in' || op.subcategory === 'refund_out',
     });
   }
   return result;
@@ -174,7 +165,7 @@ function detectRegularPayments(history, today, cfg) {
   const groups = new Map();
 
   for (const op of history) {
-    if (op.isFinancing || op.isTransfer || op.isNonOp || op.day < windowStart || op.day > today) continue;
+    if (op.isFinancing || op.isTransfer || op.isNonOp || op.isRefund || op.day < windowStart || op.day > today) continue;
     const purposeKey = normalizePurpose(op.purpose);
     if (!op.inn && !purposeKey) continue;
     // ключ без названия контрагента, если ИНН есть: название может писаться по-разному
@@ -247,9 +238,10 @@ function clusterByDayOfMonth(ops, tolerance) {
 }
 
 // Нерегулярная часть: среднее и σ дневных сумм по дню недели за последние 6 месяцев; регулярные платежи и займы исключены.
-function calculateWeekdayStats(history, regularOps, today, cfg) {
+// Пропуски в выписке (ТЗ-доработка WP-7 §8) исключаются из статистики; суточные суммы винсоризуются квантилем cfg.statsWinsorQuantile.
+function calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet = new Set()) {
   const zero = { avgIncome: 0, avgExpense: 0, stdIncome: 0, stdExpense: 0 };
-  const base = history.filter((op) => !op.isFinancing && !op.isTransfer && !op.isNonOp && op.day <= today);
+  const base = history.filter((op) => !op.isFinancing && !op.isTransfer && !op.isNonOp && !op.isRefund && op.day <= today);
   if (!base.length) {
     return { byWeekday: Array.from({ length: 7 }, () => ({ ...zero })), avgDailyIncome: 0, windowDays: 0, daily: null, ownerWithdrawals: null };
   }
@@ -268,8 +260,24 @@ function calculateWeekdayStats(history, regularOps, today, cfg) {
     (op.direction === 'in' ? incomes : expenses)[op.day - windowStart] += op.amount;
   }
 
+  // Винсоризация (ТЗ-доработка WP-7 §12): суточная сумма не превышает k-й квантиль ненулевых сумм своего направления
+  if (cfg.statsWinsorQuantile != null && cfg.statsWinsorQuantile < 1) {
+    const winsorCap = (arr) => {
+      const nonzero = Array.from(arr).filter((v) => v > 0).sort((a, b) => a - b);
+      if (!nonzero.length) return Infinity;
+      return quantile(nonzero, cfg.statsWinsorQuantile);
+    };
+    const capIn = winsorCap(incomes);
+    const capOut = winsorCap(expenses);
+    for (let k = 0; k < windowDays; k++) {
+      if (incomes[k] > capIn) incomes[k] = capIn;
+      if (expenses[k] > capOut) expenses[k] = capOut;
+    }
+  }
+
   const acc = Array.from({ length: 7 }, () => ({ n: 0, sIn: 0, sOut: 0, qIn: 0, qOut: 0 }));
   for (let k = 0; k < windowDays; k++) {
+    if (gapDaySet.has(windowStart + k)) continue; // пропущенные дни в статистику не входят
     const a = acc[weekdayOf(windowStart + k)];
     a.n++;
     a.sIn += incomes[k];
@@ -483,7 +491,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
 // Монте-Карло (ТЗ §6.3): доля прогонов, где остаток ниже T. Нерегулярная часть — блочный bootstrap реальных дней того же дня недели
 // (сохраняет среднее, перекос и связь «приход/расход»); при короткой истории — усечённое нормальное с сохранением среднего.
 // Риски реализуются целиком со своей вероятностью; выводы владельцем ограничены остатком над «полом».
-function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], currentBalance, threshold, runs, seed, cfg }) {
+function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], currentBalance, threshold, runs, seed, cfg, gapDaySet = new Set() }) {
   const rng = createRng(seed);
   const normal = createNormalSampler(rng);
   const horizon = days.length;
@@ -506,7 +514,14 @@ function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], 
   const useBootstrap = cfg.mcMode === 'bootstrap' && daily && daily.incomes.length >= cfg.mcBootstrapMinDays;
   const starts = Array.from({ length: 7 }, () => []); // допустимые начала блоков по дню недели
   if (useBootstrap) {
-    for (let k = 0; k + blockLen <= daily.incomes.length; k++) starts[weekdayOf(daily.start + k)].push(k);
+    for (let k = 0; k + blockLen <= daily.incomes.length; k++) {
+      // ТЗ-доработка WP-7 §8: блок не может начинаться или пересекать пропущенный день
+      let blocked = false;
+      for (let j = 0; j < blockLen; j++) {
+        if (gapDaySet.has(daily.start + k + j)) { blocked = true; break; }
+      }
+      if (!blocked) starts[weekdayOf(daily.start + k)].push(k);
+    }
   }
   const normalMu = stats.byWeekday.map((st) => ({
     income: preserveMean(st.avgIncome, st.stdIncome),
@@ -638,9 +653,11 @@ export function calculateForecast(
   }
 
   // 1–2. Регулярная и нерегулярная части
+  // Пропуски в выписке (ТЗ-доработка WP-7 §8): дни с «прыжком» остатка исключаются из статистики и bootstrap-блоков
+  const { gapDaySet } = cfg.gapDetection === false ? { gapDaySet: new Set() } : findGaps(history);
   const regular = detectRegularPayments(history, today, cfg);
   const regularOps = new Set(regular.flatMap((payment) => payment.ops));
-  const stats = calculateWeekdayStats(history, regularOps, today, cfg);
+  const stats = calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet);
 
   // 3. План по дням: регулярные платежи, будущие операции, риски, плановые события
   const { byDay: scheduled, plannedInEvents } = collectScheduledEvents(normalized, options.extraEvents, today, horizon, plannedEvents, cfg);
@@ -651,18 +668,23 @@ export function calculateForecast(
     ? options.goodDayThreshold
     : stats.avgDailyIncome * cfg.goodDayMultiplier;
 
-  // Вероятность разрыва и полосы неопределённости (считаются до сборки ряда, чтобы вписать p10/p90 в каждую точку)
-  const monteCarlo = simulateGapProbability({
-    days,
-    stats,
-    riskPlans,
-    plannedInEvents,
-    currentBalance,
-    threshold,
-    runs: cfg.monteCarloSimulations,
-    seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
-    cfg
-  });
+  // Вероятность разрыва и полосы неопределённости (считаются до сборки ряда, чтобы вписать p10/p90 в каждую точку).
+  // ТЗ-доработка WP-7 §9: при истории ≤ 14 дней MC не запускать (mcDisabled от контроллера).
+  const mcDisabled = Boolean(options.mcDisabled);
+  const monteCarlo = mcDisabled
+    ? { probabilityPct: 0, medianShortfall: 0, p90Shortfall: 0, dangerProbabilityByDay: null, cumulativeGapProbabilityByDay: null, band: null }
+    : simulateGapProbability({
+        days,
+        stats,
+        riskPlans,
+        plannedInEvents,
+        currentBalance,
+        threshold,
+        runs: cfg.monteCarloSimulations,
+        seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
+        cfg,
+        gapDaySet
+      });
 
   const monteCarloBand = monteCarlo.band;
 
@@ -733,7 +755,9 @@ export function calculateForecast(
 
   // Дата, к которой разрыв становится вероятным: накопленная вероятность пробоя порога монотонна и заканчивается на gapProbabilityPct, поэтому
   // дата есть ровно тогда, когда gapProbabilityPct ≥ порога (в отличие от gapDate, считаемого по среднему пути)
-  const probableIdx = monteCarlo.cumulativeGapProbabilityByDay.findIndex((p) => p >= cfg.probableGapThresholdPct);
+  const probableIdx = monteCarlo.cumulativeGapProbabilityByDay
+    ? monteCarlo.cumulativeGapProbabilityByDay.findIndex((p) => p >= cfg.probableGapThresholdPct)
+    : -1;
   const probableGapDate = probableIdx >= 0 ? forecastSeries[probableIdx].date : null;
 
   const historyDays = normalized.length ? today - normalized.reduce((m, op) => Math.min(m, op.day), Infinity) + 1 : 0;
@@ -744,13 +768,13 @@ export function calculateForecast(
 
   return {
     gapDate,
-    gapProbabilityPct: Math.round(monteCarlo.probabilityPct * 10) / 10,
+    gapProbabilityPct: mcDisabled ? null : Math.round(monteCarlo.probabilityPct * 10) / 10,
     gapAmount: round2(gapAmount),
-    gapAmountMedian: round2(monteCarlo.medianShortfall),
-    gapAmountP90: round2(monteCarlo.p90Shortfall),
+    gapAmountMedian: mcDisabled ? null : round2(monteCarlo.medianShortfall),
+    gapAmountP90: mcDisabled ? null : round2(monteCarlo.p90Shortfall),
     probableGapDate,
-    dangerProbabilityByDay: monteCarlo.dangerProbabilityByDay.map((p) => Math.round(p * 10) / 10),
-    cumulativeGapProbabilityByDay: monteCarlo.cumulativeGapProbabilityByDay.map((p) => Math.round(p * 10) / 10),
+    dangerProbabilityByDay: monteCarlo.dangerProbabilityByDay ? monteCarlo.dangerProbabilityByDay.map((p) => Math.round(p * 10) / 10) : null,
+    cumulativeGapProbabilityByDay: monteCarlo.cumulativeGapProbabilityByDay ? monteCarlo.cumulativeGapProbabilityByDay.map((p) => Math.round(p * 10) / 10) : null,
     dataQuality,
     minForecastBalance: round2(minBalance),
     forecastSeries,

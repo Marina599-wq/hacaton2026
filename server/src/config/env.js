@@ -21,6 +21,11 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   // Список разрешённых CORS-origins через запятую; дефолт для разработки — http://localhost:5173.
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
+  // Опорная дата прогноза для демо (ТЗ-доработка WP-7 §9): переопределяет asOf на всех вкладках.
+  FORECAST_AS_OF: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'FORECAST_AS_OF — дата в формате ГГГГ-ММ-ДД')
+    .optional(),
 });
 
 function fail(message) {

@@ -31,7 +31,8 @@ import {
 import { ForecastChart } from '@/components/charts/ForecastChart';
 import { cn } from '@/lib/cn';
 import { formatDate, formatRub, todayISO } from '@/lib/format';
-import type { Direction, Horizon, Risk, RiskType } from '@/types/api';
+import type { Direction, Horizon, Risk, RiskType, Subcategory } from '@/types/api';
+import { PlanFactCard } from '@/components/PlanFactCard';
 
 const HORIZONS: Horizon[] = [30, 60, 90];
 
@@ -301,7 +302,10 @@ export default function Dashboard() {
             {selfLoans.error && <p className="mt-3 text-xs text-rose-400">Не удалось загрузить самозаймы</p>}
           </Card>
 
-          {/* 6. Пункты меню: песочница и календарь (ТЗ §5.2.6) */}
+          {/* 6. План-факт (ТЗ-доработка WP-5) */}
+          <PlanFactCard />
+
+          {/* 7. Пункты меню: песочница и календарь (ТЗ §5.2.6) */}
           <Card title="Меню">
             <div className="grid gap-2 sm:grid-cols-2">
               <Button variant="secondary" icon={FlaskConical} onClick={() => navigate('/sandbox')}>
@@ -405,8 +409,11 @@ function AddOperationForm({ onSaved, onCanceled }: { onSaved: () => void; onCanc
   const [direction, setDirection] = useState<Direction>('out');
   const [counterparty, setCounterparty] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ТЗ-доработка WP-3: подкатегория в модалке операции (+ «Не категоризовано»)
+  const cats = useAsync(() => api.categories.list(), []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -432,6 +439,7 @@ function AddOperationForm({ onSaved, onCanceled }: { onSaved: () => void; onCanc
         direction,
         counterpartyName: counterparty.trim() || undefined,
         purpose: purpose.trim(),
+        subcategory: subcategory === '' ? undefined : (subcategory as Subcategory),
       });
       onSaved();
     } catch (err) {
@@ -439,6 +447,10 @@ function AddOperationForm({ onSaved, onCanceled }: { onSaved: () => void; onCanc
       setBusy(false);
     }
   }
+
+  const subOptions = (cats.data?.subcategories ?? [])
+    .filter((s) => s.direction === direction)
+    .map((s) => ({ id: s.id, label: s.label }));
 
   return (
     <form onSubmit={submit} className="space-y-3">
@@ -457,12 +469,23 @@ function AddOperationForm({ onSaved, onCanceled }: { onSaved: () => void; onCanc
           />
         </Field>
       </div>
-      <Field label="Тип">
-        <Select value={direction} onChange={(e) => setDirection(e.target.value as Direction)}>
-          <option value="in">Доход</option>
-          <option value="out">Расход</option>
-        </Select>
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Тип">
+          <Select value={direction} onChange={(e) => { setDirection(e.target.value as Direction); setSubcategory(''); }}>
+            <option value="in">Доход</option>
+            <option value="out">Расход</option>
+          </Select>
+        </Field>
+        {/* ТЗ-доработка WP-3 §2: подкатегория; пустое — автокатегоризация, '' — «Не категоризовано» */}
+        <Field label="Подкатегория">
+          <Select value={subcategory} onChange={(e) => setSubcategory(e.target.value)}>
+            <option value="">Авто (по назначению)</option>
+            {subOptions.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
       <Field label="Контрагент (необязательно)">
         <Input
           value={counterparty}

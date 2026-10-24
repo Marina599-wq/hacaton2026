@@ -31,6 +31,9 @@ model Operation {
   amount           Float             // всегда положительное
   direction        String            // "in" | "out"
   category         String            // "income" | "expense" | "payment" | "tax" | "salary" | "other"
+  subcategory      String?           // ТЗ-доработка WP-3 §2.1: подкатегория (17 слогов, см. src/config/categories.config.js); null — не категоризована
+  categoryConfidence Float?          // доверие категоризации 0..1 (rule) или null (manual)
+  categorySource   String   @default("rule") // "rule" | "manual" (исходник правила, TZ §2.3)
   counterpartyName String            // хранится обезличенным
   counterpartyInn  String            // хранится обезличенным
   purpose          String
