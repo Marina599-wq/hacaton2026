@@ -88,8 +88,8 @@ export default function Sandbox() {
           <Field label="Повторение" hint="1 — одноразово, N — ежемесячно N раз">
             <Input type="number" min="1" step="1" value={repeats} onChange={(e) => setRepeats(e.target.value)} />
           </Field>
-          <div className="flex items-end">
-            <Button type="submit" loading={busy} className="w-full">
+          <div className="sm:col-span-2 sm:flex sm:justify-end">
+            <Button type="submit" loading={busy} className="w-full sm:w-56">
               Рассчитать сценарий
             </Button>
           </div>
@@ -103,23 +103,23 @@ export default function Sandbox() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="pb-2">Параметр</th>
-                  <th className="pb-2">Базовый прогноз</th>
-                  <th className="pb-2">Сценарий</th>
+                  <th className="pb-2 pr-4 sm:pr-6">Параметр</th>
+                  <th className="pb-2 pr-4 sm:pr-6">Базовый прогноз</th>
+                  <th className="pb-2 pr-4 sm:pr-6">Сценарий</th>
                   <th className="pb-2">Изменение</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
                 <tr>
-                  <td className="py-2 text-slate-400">Дата разрыва</td>
-                  <td>{result.base.gapDate ? formatDate(result.base.gapDate) : '—'}</td>
-                  <td>{result.scenario.gapDate ? formatDate(result.scenario.gapDate) : '—'}</td>
+                  <td className="py-2 pr-4 text-slate-400 sm:pr-6">Дата разрыва</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{result.base.gapDate ? formatDate(result.base.gapDate) : '—'}</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{result.scenario.gapDate ? formatDate(result.scenario.gapDate) : '—'}</td>
                   <td className="text-slate-400">—</td>
                 </tr>
                 <tr>
-                  <td className="py-2 text-slate-400">Вероятность разрыва</td>
-                  <td>{Math.round(result.base.gapProbabilityPct)}%</td>
-                  <td>{Math.round(result.scenario.gapProbabilityPct)}%</td>
+                  <td className="py-2 pr-4 text-slate-400 sm:pr-6">Вероятность разрыва</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{Math.round(result.base.gapProbabilityPct)}%</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{Math.round(result.scenario.gapProbabilityPct)}%</td>
                   <td
                     className={cn(
                       'font-medium',
@@ -131,9 +131,9 @@ export default function Sandbox() {
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2 text-slate-400">Сумма разрыва</td>
-                  <td>{formatRub(result.base.gapAmount)}</td>
-                  <td>{formatRub(result.scenario.gapAmount)}</td>
+                  <td className="py-2 pr-4 text-slate-400 sm:pr-6">Сумма разрыва</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{formatRub(result.base.gapAmount)}</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{formatRub(result.scenario.gapAmount)}</td>
                   <td
                     className={cn(
                       'font-medium',

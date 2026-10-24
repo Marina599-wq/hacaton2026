@@ -48,17 +48,17 @@ export function ForecastChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3a3b41" />
         <XAxis
           dataKey="date"
           tickFormatter={(d: string) => d.slice(5)}
-          tick={{ fontSize: 11, fill: '#94a3b8' }}
+          tick={{ fontSize: 11, fill: '#979aa1' }}
           minTickGap={28}
           tickLine={false}
         />
         <YAxis
           tickFormatter={(v: number) => formatRubShort(v)}
-          tick={{ fontSize: 11, fill: '#94a3b8' }}
+          tick={{ fontSize: 11, fill: '#979aa1' }}
           width={72}
           tickLine={false}
           axisLine={false}
@@ -67,16 +67,16 @@ export function ForecastChart({
           formatter={(value, name) => [formatRub(Number(value)), String(name)]}
           labelFormatter={(label) => String(label).slice(0, 10)}
           contentStyle={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
+            backgroundColor: '#3a3b41',
+            border: '1px solid #4a4b52',
             borderRadius: 8,
             fontSize: 12,
-            color: '#f1f5f9',
+            color: '#f5f5f6',
           }}
-          labelStyle={{ color: '#94a3b8' }}
-          itemStyle={{ color: '#f1f5f9' }}
+          labelStyle={{ color: '#979aa1' }}
+          itemStyle={{ color: '#f5f5f6' }}
         />
-        <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
+        <Legend wrapperStyle={{ fontSize: 12, color: '#979aa1' }} />
         <ReferenceLine y={threshold} stroke="#f43f5e" strokeDasharray="4 4" />
         {ranges.map(([from, to]) => (
           <ReferenceArea
@@ -89,9 +89,9 @@ export function ForecastChart({
             strokeOpacity={0.25}
           />
         ))}
-        <Bar dataKey="income" name="Доход" fill="#10b981" fillOpacity={0.65} barSize={5} />
-        <Bar dataKey="expense" name="Расход" fill="#64748b" fillOpacity={0.65} barSize={5} />
-        <Line dataKey="balance" name="Прогноз остатка" stroke="#34d399" strokeWidth={2} dot={false} />
+        <Bar dataKey="income" name="Доход" fill="#9cad76" fillOpacity={0.65} barSize={5} />
+        <Bar dataKey="expense" name="Расход" fill="#5f616a" fillOpacity={0.65} barSize={5} />
+        <Line dataKey="balance" name="Прогноз остатка" stroke="#b9ca9d" strokeWidth={2} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );

@@ -124,7 +124,7 @@ export default function Payments() {
               {formatRub(result.operation.amount)} записан как расход.
             </div>
             {result.warning?.gapGrows && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
                 <b>Внимание:</b> этот платёж увеличивает кассовый разрыв
                 {result.warning.newGapAmount != null ? ` — новая сумма: ${formatRub(result.warning.newGapAmount)}` : ''}.
               </div>

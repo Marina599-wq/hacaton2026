@@ -33,3 +33,8 @@ Scope: four confirmed frontend bugs + TZ gaps (threshold T config, statement tem
   CHECK: node client/scripts/verify-design.mjs
   EXPECT: design pass verified
   EVIDENCE: manual-evidence=v1; check=node client/scripts/verify-design.mjs; exit=0; output="design pass verified (15/15 checks)"; visual=dev-server+stub-screenshots 390px (home/history/calendar dark verified, no light leftovers); tsc+build clean
+
+- [x] G7: history donut readable + tooltip informative: slices distinguished (3 greens + 2 grays, separators), no empty-ring state in hidden tabs, tooltip shows category/amount/share%/total
+  CHECK: node client/scripts/verify-history-pie.mjs
+  EXPECT: history pie gate passed
+  EVIDENCE: manual-evidence=v1; check=node client/scripts/verify-history-pie.mjs; exit=0; output="history pie gate passed (5/5 checks)"; visual=390px+1440px browser: 5 sectors rendered with distinct fills, per-slice tooltips verified (Доход 53%, Зарплата 21%, Платёж 12%, Прочее 1%, всего 858 000,00 ₽), no horizontal overflow at 390px; tsc+eslint clean

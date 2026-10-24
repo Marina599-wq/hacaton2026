@@ -12,14 +12,9 @@ export default function AppLayout() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-3 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-500 text-sm font-bold text-slate-950">
-              ₽
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-100">Кассовые разрывы</p>
-              <p className="truncate text-xs text-slate-400">{user ? user.companyName : 'прогноз по счёту'}</p>
-            </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-100">Кассовые разрывы</p>
+            <p className="truncate text-xs text-slate-400">{user ? user.companyName : 'прогноз по счёту'}</p>
           </div>
           <Button variant="ghost" size="sm" icon={LogOut} onClick={logout}>
             Выйти

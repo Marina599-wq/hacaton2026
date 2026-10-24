@@ -33,25 +33,36 @@ export function ScenarioCompareChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3a3b41" />
         <XAxis
           dataKey="date"
           tickFormatter={(d: string) => d.slice(5)}
-          tick={{ fontSize: 11, fill: '#64748b' }}
+          tick={{ fontSize: 11, fill: '#979aa1' }}
           minTickGap={28}
           tickLine={false}
         />
         <YAxis
           tickFormatter={(v: number) => formatRubShort(v)}
-          tick={{ fontSize: 11, fill: '#64748b' }}
+          tick={{ fontSize: 11, fill: '#979aa1' }}
           width={72}
           tickLine={false}
           axisLine={false}
         />
-        <Tooltip formatter={(value, name) => [formatRub(Number(value)), String(name)]} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Line dataKey="base" name="Базовый прогноз" stroke="#64748b" strokeWidth={2} dot={false} />
-        <Line dataKey="scenario" name="Сценарий" stroke="#2563eb" strokeWidth={2} dot={false} />
+        <Tooltip
+          formatter={(value, name) => [formatRub(Number(value)), String(name)]}
+          contentStyle={{
+            backgroundColor: '#3a3b41',
+            border: '1px solid #4a4b52',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#f5f5f6',
+          }}
+          labelStyle={{ color: '#979aa1' }}
+          itemStyle={{ color: '#f5f5f6' }}
+        />
+        <Legend wrapperStyle={{ fontSize: 12, color: '#979aa1' }} />
+        <Line dataKey="base" name="Базовый прогноз" stroke="#979aa1" strokeWidth={2} strokeDasharray="6 4" dot={false} />
+        <Line dataKey="scenario" name="Сценарий" stroke="#9cad76" strokeWidth={2} dot={false} />
       </LineChart>
     </ResponsiveContainer>
   );

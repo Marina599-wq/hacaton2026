@@ -89,10 +89,7 @@ export default function Auth() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
       <div className="w-full max-w-md">
-        <div className="mb-5 flex items-center justify-center gap-2.5">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-lg font-bold text-slate-950">
-            ₽
-          </div>
+        <div className="mb-5 flex flex-col items-center text-center">
           <div>
             <h1 className="text-lg font-bold text-slate-100">Кассовые разрывы</h1>
             <p className="text-xs text-slate-400">Прогноз кассовых разрывов по банковскому счёту</p>

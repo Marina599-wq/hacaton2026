@@ -7,9 +7,9 @@ const TONES: Record<Tone, string> = {
   gray: 'bg-slate-800 text-slate-300',
   green: 'bg-emerald-500/15 text-emerald-400',
   red: 'bg-rose-500/15 text-rose-400',
-  blue: 'bg-sky-500/15 text-sky-300',
-  amber: 'bg-amber-500/15 text-amber-300',
-  violet: 'bg-violet-500/15 text-violet-300',
+  blue: 'bg-slate-700/40 text-slate-300',
+  amber: 'bg-slate-700/40 text-slate-300',
+  violet: 'bg-emerald-500/15 text-emerald-400',
 };
 
 export function Badge({

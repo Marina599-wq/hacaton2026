@@ -38,8 +38,9 @@ ok(dash.includes('bg-emerald-500 font-medium text-slate-950'), 'Dashboard: horiz
 ok(dash.includes('text-rose-400'), 'Dashboard: gap/danger in rose');
 
 // 5) Графики в тёмной палитре
-ok(f('client/src/components/charts/ForecastChart.tsx').includes('#1e293b') && f('client/src/components/charts/ForecastChart.tsx').includes('#34d399'), 'ForecastChart: dark grid + green line');
-ok(f('client/src/components/charts/CategoryPie.tsx').includes('#34d399'), 'CategoryPie: green/gray palette');
+ok(f('client/src/components/charts/ForecastChart.tsx').includes('#3a3b41') && f('client/src/components/charts/ForecastChart.tsx').includes('#b9ca9d'), 'ForecastChart: dark grid + green line');
+const pie = f('client/src/components/charts/CategoryPie.tsx');
+ok(['#9cad76', '#7f915f', '#495736', '#979aa1', '#7c7e86'].every((c) => pie.includes(c)), 'CategoryPie: In Color Balance palette');
 
 // 6) Остатки светлой темы — только допустимые исключения (белый ползунок Toggle)
 const srcDir = path.join(root, 'client/src').split(path.sep).join('/');
