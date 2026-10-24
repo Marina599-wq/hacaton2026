@@ -3,10 +3,28 @@ import { formatRub } from '@/lib/format';
 import './category-pie.css';
 
 /**
- * Палитра «In Color Balance»: шалфей и олива для доходных категорий,
- * серо-голубые — расходы, чтобы сегменты не сливались в одно кольцо.
+ * Палитра «In Color Balance»: шалфей/олива — доходные категории,
+ * серо-голубые — расходные, оливковый — налоги. Rose (#f43f5e) зарезервана
+ * только под danger и для сегментов не используется.
  */
-const PALETTE = ['#9cad76', '#7f915f', '#495736', '#979aa1', '#7c7e86', '#5f616a', '#f43f5e'];
+const CATEGORY_COLORS: Record<string, string> = {
+  income: '#7f915f', // доход — шалфей
+  salary: '#9cad76', // зарплата — светлый шалфей
+  expense: '#7c7e86', // расход — серо-голубой
+  payment: '#5f616a', // платёж — тёмный серо-голубой
+  tax: '#495736', // налоги — тёмная олива
+  other: '#979aa1', // прочее — нейтральный серый
+};
+
+// Стабильный fallback для неизвестных ключей: цвет зависит только от ключа,
+// а не от позиции в списке, чтобы при добавлении категорий цвета не прыгали.
+const FALLBACK_PALETTE = ['#9cad76', '#979aa1', '#7f915f', '#7c7e86', '#495736', '#5f616a'];
+function fallbackColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return FALLBACK_PALETTE[h % FALLBACK_PALETTE.length];
+}
+const colorFor = (key: string) => CATEGORY_COLORS[key] ?? fallbackColor(key);
 
 function PieTooltip({
   active,
@@ -43,7 +61,7 @@ export function CategoryPie({
   items: Array<{ key: string; label: string; value: number }>;
   height?: number;
 }) {
-  const data = items.map((it, i) => ({ ...it, fill: PALETTE[i % PALETTE.length] }));
+  const data = items.map((it) => ({ ...it, fill: colorFor(it.key) }));
   return (
     <div className="category-pie-enter">
     <ResponsiveContainer width="100%" height={height}>
