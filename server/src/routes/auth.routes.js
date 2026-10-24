@@ -8,7 +8,7 @@ import { registerSchema, loginSchema } from '../schemas/auth.schema.js';
 
 const router = Router();
 
-router.post('/register', upload.single('statement'), validate(registerSchema), register);
+router.post('/register', upload.single('file'), validate(registerSchema), register);
 router.post('/login', validate(loginSchema), login);
 router.get('/me', authMiddleware, getMe);
 router.patch('/user', authMiddleware, updateUser);

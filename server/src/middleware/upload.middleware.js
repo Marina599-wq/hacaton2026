@@ -6,9 +6,10 @@ const storage = multer.memoryStorage();
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 МБ
+  // 25 МБ: полный файл all_operations.csv (~222 тыс. строк) тоже проходит
+  limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.originalname.match(/\.(csv|xlsx)$/)) {
+    if (file.originalname.match(/\.(csv|xlsx)$/i)) {
       cb(null, true);
     } else {
       cb(ApiError.badRequest('Поддерживаются только форматы CSV и XLSX'));

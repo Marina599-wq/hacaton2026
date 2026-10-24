@@ -27,18 +27,24 @@ export async function register(req, res, next) {
         data: transactions.map(tx => ({ ...tx, userId: user.id }))
       });
     } else if (req.file) {
-      const rawOps = await parseBankStatement(req.file.buffer, req.file.originalname);
+      const { operations: rawOps, meta, warnings } = await parseBankStatement(req.file.buffer, req.file.originalname);
+      // Данные организаторов (test-data/*.csv) уже обезличены на источнике — маскируем только легаси-выписки
       const opsToCreate = rawOps.map(op => {
-        const { name, inn: mInn } = anonymizeCounterparty(op.counterpartyName, op.counterpartyInn);
+        const { name, inn: mInn } = meta.format === 'organizer'
+          ? { name: op.counterpartyName, mInn: 0 }
+          : anonymizeCounterparty(op.counterpartyName, op.counterpartyInn);
+        const { companyId, ...rest } = op;
         return {
-          ...op,
-          counterpartyName: name,
-          counterpartyInn: mInn,
+          ...rest,
+          counterpartyName: meta.format === 'organizer' ? name : name,
+          counterpartyInn: meta.format === 'organizer' ? op.counterpartyInn : mInn,
           userId: user.id,
           source: 'import'
         };
       });
       await prisma.operation.createMany({ data: opsToCreate });
+      // warnings не бросаем — часть строк может быть некорректной в реальной выгрузке
+      console.log(`[import] ${req.file.originalname}: format=${meta.format}, parsed=${opsToCreate.length}, skipped=${meta.rowsSkipped}, warnings=${warnings.length}`);
     }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });

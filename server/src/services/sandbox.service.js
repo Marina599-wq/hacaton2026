@@ -3,13 +3,15 @@ import { calculateForecast } from './forecast.service.js';
 
 const HORIZON_DAYS = 90;
 
-/** Прогноз движка -> контрактная форма ForecastResult (series с income/expense). */
-function toContractForecast(fc) {
+/** Прогноз движка -> контрактная форма ForecastResult (series с income/expense, dangerDays). */
+function toContractForecast(fc, threshold) {
   return {
-    series: fc.forecastSeries.map((p) => ({ date: p.date, income: 0, expense: 0, balance: p.balance })),
+    series: fc.forecastSeries.map((p) => ({ date: p.date, income: p.income ?? 0, expense: p.expense ?? 0, balance: p.balance })),
     gapDate: fc.gapDate ?? null,
     gapProbabilityPct: fc.gapProbabilityPct ?? 0,
     gapAmount: fc.gapAmount ?? 0,
+    dangerDays: fc.dangerDays ?? [],
+    threshold,
   };
 }
 
@@ -55,8 +57,8 @@ export class SandboxService {
     }
     const scenarioFc = calculateForecast([...operations, ...synthetic], risks, currentBalance, HORIZON_DAYS, minThreshold);
 
-    const base = toContractForecast(baseFc);
-    const scenario = toContractForecast(scenarioFc);
+    const base = toContractForecast(baseFc, minThreshold);
+    const scenario = toContractForecast(scenarioFc, minThreshold);
 
     await prisma.sandboxScenario.create({
       data: {

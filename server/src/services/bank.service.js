@@ -16,8 +16,67 @@ export class BankService {
     return bankAdapter.connect(data);
   }
 
+  /**
+   * Синхронизация с банком (заглушка): генерирует новые банковские операции
+   * и записывает их в БД (source='bank_stub'), чтобы все банковские движения
+   * учитывались в остатке и прогнозе. Повторный синк за один день не дублирует.
+   */
   async sync(userId) {
-    return bankAdapter.sync();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const already = await prisma.operation.findMany({ where: { userId, source: 'bank_stub', date: today } });
+    if (already.length > 0) {
+      return { synced: true, new: 0, operations: already };
+    }
+
+    const operations = await prisma.operation.findMany({ where: { userId }, orderBy: { date: 'asc' } });
+    let balance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
+
+    // Детерминированный «банк»: суммы зависят от даты, а не от Math.random().
+    const dayKey = `${userId}_${today.toISOString().slice(0, 10)}`;
+    const h = [...dayKey].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 100000, 7);
+    const rnd = (min, max, salt) => min + ((h * (salt + 13)) % (max - min));
+
+    const candidates = [
+      {
+        amount: Math.round(rnd(35000, 95000, 1)),
+        direction: 'in',
+        category: 'income',
+        counterpartyName: 'ООО ТехноПром',
+        counterpartyInn: '7712345678',
+        purpose: 'Оплата по договору поставки',
+      },
+      {
+        amount: Math.round(rnd(4000, 18000, 2)),
+        direction: 'out',
+        category: 'expense',
+        counterpartyName: 'ООО Офис Снаб',
+        counterpartyInn: '7723456789',
+        purpose: 'Хозяйственные расходы',
+      },
+    ];
+
+    const created = [];
+    for (const c of candidates) {
+      balance += c.direction === 'in' ? c.amount : -c.amount;
+      const op = await prisma.operation.create({
+        data: {
+          userId,
+          date: today,
+          amount: c.amount,
+          direction: c.direction,
+          category: c.category,
+          counterpartyName: c.counterpartyName,
+          counterpartyInn: c.counterpartyInn,
+          purpose: c.purpose,
+          balanceEndOfDay: Math.round(balance * 100) / 100,
+          source: 'bank_stub',
+        },
+      });
+      created.push(op);
+    }
+    return { synced: true, new: created.length, operations: created };
   }
 
   async listAccounts(userId) {

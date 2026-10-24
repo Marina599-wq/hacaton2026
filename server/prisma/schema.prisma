@@ -35,9 +35,11 @@ model Operation {
   purpose          String
   balanceEndOfDay  Float
   source           String            // "import" | "manual" | "bank_stub" | "self_loan" | "bank_loan" | "payment"
+  externalId       String?           // operation_id из выписки (для дедупликации при повторном импорте)
   createdAt        DateTime @default(now())
 
   @@index([userId, date])
+  @@unique([userId, externalId])
 }
 
 model Risk {
