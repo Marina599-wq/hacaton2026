@@ -2,7 +2,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/db.js';
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 import { generateDemoTransactions } from '../../prisma/seed/demo-data.js';
 import { parseBankStatement } from '../utils/parser.js';
 import { anonymizeCounterparty } from '../utils/anonymizer.js';
@@ -44,10 +46,15 @@ export async function register(req, res, next) {
       });
       await prisma.operation.createMany({ data: opsToCreate });
       // warnings не бросаем — часть строк может быть некорректной в реальной выгрузке
-      console.log(`[import] ${req.file.originalname}: format=${meta.format}, parsed=${opsToCreate.length}, skipped=${meta.rowsSkipped}, warnings=${warnings.length}`);
+      // Строка про импорт — без имени файла: только число строк, пропущенных и предупреждений.
+      logger.info('import', { lines: opsToCreate.length, skipped: meta.rowsSkipped, warnings: warnings.length });
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      env.JWT_SECRET,
+      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN }
+    );
 
     res.status(201).json({ token, user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn, minBalance: user.minBalance ?? 0 } });
   } catch (err) {
@@ -59,12 +66,16 @@ export async function login(req, res, next) {
   try {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) throw ApiError.badRequest('Неверный email или пароль');
+    if (!user) throw ApiError.unauthorized('Неверный email или пароль', 'INVALID_CREDENTIALS');
 
     const isValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isValid) throw ApiError.badRequest('Неверный email или пароль');
+    if (!isValid) throw ApiError.unauthorized('Неверный email или пароль', 'INVALID_CREDENTIALS');
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      env.JWT_SECRET,
+      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN }
+    );
 
     res.json({ token, user: { id: user.id, email: user.email, companyName: user.companyName, inn: user.inn } });
   } catch (err) {
