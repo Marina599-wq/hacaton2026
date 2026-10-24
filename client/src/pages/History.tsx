@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '@/api';
@@ -32,6 +32,8 @@ export default function History() {
   const [month, setMonth] = useState(currentMonth());
   const [category, setCategory] = useState<HistoryCategory>('');
   const [page, setPage] = useState(1);
+  const [slideDir, setSlideDir] = useState<'next' | 'prev' | null>(null);
+  const swipe = useRef<{ x: number; y: number } | null>(null);
 
   const summary = useAsync(() => api.history.summary({ month, category }), [month, category]);
   const ops = useAsync(
@@ -45,8 +47,19 @@ export default function History() {
   }
 
   function changeMonth(delta: number) {
+    setSlideDir(delta > 0 ? 'next' : 'prev');
     setMonth((m) => shiftMonth(m, delta));
     setPage(1);
+  }
+
+  /** Горизонтальный свайп по области диаграммы листает месяцы */
+  function onSwipeUp(e: ReactPointerEvent) {
+    if (swipe.current === null) return;
+    const dx = e.clientX - swipe.current.x;
+    const dy = e.clientY - swipe.current.y;
+    swipe.current = null;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    changeMonth(dx < 0 ? 1 : -1);
   }
 
   const groups = summary.data?.groups ?? [];
@@ -93,17 +106,32 @@ export default function History() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title={summary.data ? `Итого: ${formatRub(summary.data.total)}` : 'По группам'}>
-          {summary.error ? (
-            <ErrorState error={summary.error} onRetry={summary.refetch} />
-          ) : summary.loading ? (
-            <Skeleton className="h-56" />
-          ) : groups.length === 0 ? (
-            <EmptyState title="Нет данных за этот месяц" />
-          ) : (
-            <CategoryPie items={pieItems} />
-          )}
-        </Card>
+        {/* Свайп по области диаграммы (слева/справа) листает месяцы */}
+        <div
+          className="min-w-0"
+          style={{ touchAction: 'pan-y' }}
+          onPointerDown={(e) => {
+            swipe.current = { x: e.clientX, y: e.clientY };
+          }}
+          onPointerUp={onSwipeUp}
+        >
+          <div
+            key={`${month}-${slideDir ?? ''}`}
+            className={slideDir === 'next' ? 'hist-slide-next' : slideDir === 'prev' ? 'hist-slide-prev' : undefined}
+          >
+            <Card title={summary.data ? `Итого: ${formatRub(summary.data.total)}` : 'По группам'}>
+              {summary.error ? (
+                <ErrorState error={summary.error} onRetry={summary.refetch} />
+              ) : summary.loading ? (
+                <Skeleton className="h-56" />
+              ) : groups.length === 0 ? (
+                <EmptyState title="Нет данных за этот месяц" />
+              ) : (
+                <CategoryPie items={pieItems} />
+              )}
+            </Card>
+          </div>
+        </div>
 
         <Card title="Операции">
           {ops.error ? (

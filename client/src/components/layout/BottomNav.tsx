@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { CreditCard, History, Home, LifeBuoy } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -10,8 +11,24 @@ const ITEMS = [
 ];
 
 export function BottomNav() {
+  // Футер выезжает при любом небольшом скролле вниз и прячется в самом верху страницы
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    function onScroll() {
+      setShown(window.scrollY > 16);
+    }
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-800 bg-slate-900/95 pb-safe backdrop-blur">
+    <nav
+      className={cn(
+        'fixed inset-x-0 bottom-0 z-40 border-t border-slate-800 bg-slate-900/95 pb-safe backdrop-blur',
+        shown ? 'nav-footer-shown' : 'nav-footer-hidden',
+      )}
+    >
       <div className="mx-auto grid max-w-5xl grid-cols-4">
         {ITEMS.map((item) => (
           <NavLink

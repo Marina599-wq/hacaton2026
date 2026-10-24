@@ -29,7 +29,13 @@ export function CategoryPie({
             color: '#f1f5f9',
           }}
         />
-        <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
+        <Legend
+          layout="vertical"
+          align="right"
+          verticalAlign="middle"
+          iconSize={12}
+          wrapperStyle={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.8 }}
+        />
       </PieChart>
     </ResponsiveContainer>
   );
