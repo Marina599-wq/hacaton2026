@@ -49,7 +49,7 @@ export default function BankStub() {
 
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
+      <div className="flex items-start gap-2 rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-slate-300">
         <Info size={16} className="mt-0.5 shrink-0" />
         <p>Демо-режим: интеграция с банком в разработке. Заявка обрабатывается заглушкой, деньги не списываются.</p>
       </div>
@@ -80,7 +80,7 @@ export default function BankStub() {
       ) : (
         <Card title="Запрос у банка">
           {dashboard.data?.forecast.gapDate && (
-            <p className="mb-3 text-sm text-slate-600">
+            <p className="mb-3 text-sm text-slate-400">
               Ближайший разрыв — <b>{formatDate(dashboard.data.forecast.gapDate)}</b> на{' '}
               <b>{formatRub(dashboard.data.forecast.gapAmount)}</b>. Сумма займа подставлена автоматически.
             </p>
@@ -98,7 +98,7 @@ export default function BankStub() {
                 константа из конфига (демо).
               </p>
             )}
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            {error && <p className="text-xs text-rose-400">{error}</p>}
             <Button type="submit" loading={busy}>
               Оформить
             </Button>

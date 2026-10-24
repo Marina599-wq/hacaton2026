@@ -87,27 +87,27 @@ export default function Auth() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
       <div className="w-full max-w-md">
         <div className="mb-5 flex items-center justify-center gap-2.5">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 text-lg font-bold text-white">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-lg font-bold text-slate-950">
             ₽
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-900">Кассовые разрывы</h1>
-            <p className="text-xs text-slate-500">Прогноз кассовых разрывов по банковскому счёту</p>
+            <h1 className="text-lg font-bold text-slate-100">Кассовые разрывы</h1>
+            <p className="text-xs text-slate-400">Прогноз кассовых разрывов по банковскому счёту</p>
           </div>
         </div>
 
         <Card>
-          <div className="mb-4 grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-sm font-medium">
+          <div className="mb-4 grid grid-cols-2 rounded-lg bg-slate-800 p-0.5 text-sm font-medium">
             <button
               type="button"
               onClick={() => {
                 setTab('login');
                 setFormError(null);
               }}
-              className={cn('rounded-md py-1.5', tab === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}
+              className={cn('rounded-md py-1.5', tab === 'login' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400')}
             >
               Вход
             </button>
@@ -117,14 +117,14 @@ export default function Auth() {
                 setTab('register');
                 setFormError(null);
               }}
-              className={cn('rounded-md py-1.5', tab === 'register' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}
+              className={cn('rounded-md py-1.5', tab === 'register' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400')}
             >
               Регистрация
             </button>
           </div>
 
           {formError && (
-            <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <span>{formError}</span>
             </div>
@@ -200,7 +200,7 @@ export default function Auth() {
                     accept=".csv,.xlsx"
                     disabled={useDemo}
                     onChange={(e) => setRegFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-sm text-slate-500 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200 disabled:opacity-50"
+                    className="block w-full text-sm text-slate-400 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-200 hover:file:bg-slate-600 disabled:opacity-50"
                   />
                 </Field>
                 {regFile && !useDemo && (
@@ -211,7 +211,7 @@ export default function Auth() {
                 <a
                   href="/statement-template.csv"
                   download="statement-template.csv"
-                  className="mt-2 inline-block text-xs font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700"
+                  className="mt-2 inline-block text-xs font-medium text-emerald-400 underline underline-offset-2 hover:text-emerald-300"
                 >
                   Скачать шаблон выписки (CSV)
                 </a>

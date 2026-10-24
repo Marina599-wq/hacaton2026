@@ -8,9 +8,9 @@ import { currentMonth, formatDate, formatRub, monthLabel, shiftMonth } from '@/l
 import type { CalendarDay, DayStatus } from '@/types/api';
 
 const STATUS_CLS: Record<DayStatus, string> = {
-  danger: 'border-red-200 bg-red-50 text-red-700',
-  good: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  neutral: 'border-slate-200 bg-white text-slate-700',
+  danger: 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+  good: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  neutral: 'border-slate-700 bg-slate-800 text-slate-300',
 };
 
 const STATUS_LABEL: Record<DayStatus, string> = {
@@ -66,7 +66,7 @@ export default function Calendar() {
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
             <span className="flex items-center gap-1.5">
-              <Flame size={12} className="text-red-500" /> опасные дни
+              <Flame size={12} className="text-rose-400" /> опасные дни
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> хорошие дни
@@ -99,12 +99,12 @@ export default function Calendar() {
                     onClick={() => day && setSelected(day)}
                     className={cn(
                       'flex h-12 flex-col items-center justify-center rounded-lg border text-sm sm:h-14',
-                      day ? STATUS_CLS[day.status] : 'border-transparent text-slate-300',
+                      day ? STATUS_CLS[day.status] : 'border-transparent text-slate-600',
                       day && 'cursor-pointer hover:opacity-80',
                     )}
                   >
                     <span className="font-medium">{Number(dayStr.slice(8))}</span>
-                    {day?.status === 'danger' && <Flame size={11} className="mt-0.5 text-red-500" />}
+                    {day?.status === 'danger' && <Flame size={11} className="mt-0.5 text-rose-400" />}
                     {day?.status === 'good' && <span className="mt-1 h-1 w-1 rounded-full bg-emerald-500" />}
                   </button>
                 );
@@ -141,7 +141,7 @@ export default function Calendar() {
             {selected.reasons.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Причины</p>
-                <ul className="list-inside list-disc space-y-0.5 text-xs text-slate-600">
+                <ul className="list-inside list-disc space-y-0.5 text-xs text-slate-300">
                   {selected.reasons.map((reason, i) => (
                     <li key={i}>{reason}</li>
                   ))}

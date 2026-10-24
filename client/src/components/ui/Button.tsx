@@ -13,11 +13,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-600',
+  primary: 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 focus-visible:ring-emerald-400',
   secondary:
-    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-400',
-  danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600',
-  ghost: 'text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-300',
+    'border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 focus-visible:ring-slate-500',
+  danger: 'bg-rose-500 text-white hover:bg-rose-400 focus-visible:ring-rose-400',
+  ghost: 'text-slate-300 hover:bg-slate-800 focus-visible:ring-slate-600',
 };
 
 const SIZES: Record<Size, string> = {

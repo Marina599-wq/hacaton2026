@@ -4,12 +4,12 @@ import { cn } from '@/lib/cn';
 export type Tone = 'gray' | 'green' | 'red' | 'blue' | 'amber' | 'violet';
 
 const TONES: Record<Tone, string> = {
-  gray: 'bg-slate-100 text-slate-600',
-  green: 'bg-emerald-100 text-emerald-700',
-  red: 'bg-red-100 text-red-700',
-  blue: 'bg-blue-100 text-blue-700',
-  amber: 'bg-amber-100 text-amber-700',
-  violet: 'bg-violet-100 text-violet-700',
+  gray: 'bg-slate-800 text-slate-300',
+  green: 'bg-emerald-500/15 text-emerald-400',
+  red: 'bg-rose-500/15 text-rose-400',
+  blue: 'bg-sky-500/15 text-sky-300',
+  amber: 'bg-amber-500/15 text-amber-300',
+  violet: 'bg-violet-500/15 text-violet-300',
 };
 
 export function Badge({

@@ -82,8 +82,8 @@ export default function History() {
               className={cn(
                 'rounded-full border px-3 py-1 text-xs font-medium',
                 category === c.value
-                  ? 'border-blue-600 bg-blue-600 text-white'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                  ? 'border-emerald-500 bg-emerald-500 text-slate-950'
+                  : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600',
               )}
             >
               {c.label}
@@ -118,19 +118,19 @@ export default function History() {
             <EmptyState title="Операций не найдено" hint="Попробуйте другой месяц или категорию" />
           ) : (
             <>
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-slate-800">
                 {opsData.items.map((op) => (
                   <li key={op.id}>
                     <button
                       type="button"
                       onClick={() => navigate(`/history/${op.id}`)}
-                      className="flex w-full items-center gap-3 py-2.5 text-left hover:bg-slate-50"
+                      className="flex w-full items-center gap-3 py-2.5 text-left hover:bg-slate-800/60"
                     >
                       <Badge tone={op.direction === 'in' ? 'green' : 'red'} className="shrink-0">
                         {op.direction === 'in' ? 'Поступление' : 'Списание'}
                       </Badge>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-slate-800">
+                        <span className="block truncate text-sm font-medium text-slate-200">
                           {op.counterpartyName}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
@@ -140,7 +140,7 @@ export default function History() {
                       <span
                         className={cn(
                           'shrink-0 text-sm font-semibold tabular-nums',
-                          op.direction === 'in' ? 'text-emerald-600' : 'text-red-600',
+                          op.direction === 'in' ? 'text-emerald-400' : 'text-rose-400',
                         )}
                       >
                         {op.direction === 'in' ? '+' : '−'}

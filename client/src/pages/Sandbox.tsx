@@ -58,7 +58,7 @@ export default function Sandbox() {
   return (
     <div className="space-y-4">
       <Card title="Песочница: сценарий без последствий">
-        <p className="mb-3 text-sm text-slate-600">
+        <p className="mb-3 text-sm text-slate-400">
           Эмулируйте возможную трату или доход (например, покупку автомобиля) — система посчитает
           сценарный прогноз на тех же данных и покажет разницу.
         </p>
@@ -93,7 +93,7 @@ export default function Sandbox() {
               Рассчитать сценарий
             </Button>
           </div>
-          {error && <p className="text-xs text-red-600 sm:col-span-2">{error}</p>}
+          {error && <p className="text-xs text-rose-400 sm:col-span-2">{error}</p>}
         </form>
       </Card>
 
@@ -109,21 +109,21 @@ export default function Sandbox() {
                   <th className="pb-2">Изменение</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-800">
                 <tr>
-                  <td className="py-2 text-slate-600">Дата разрыва</td>
+                  <td className="py-2 text-slate-400">Дата разрыва</td>
                   <td>{result.base.gapDate ? formatDate(result.base.gapDate) : '—'}</td>
                   <td>{result.scenario.gapDate ? formatDate(result.scenario.gapDate) : '—'}</td>
                   <td className="text-slate-400">—</td>
                 </tr>
                 <tr>
-                  <td className="py-2 text-slate-600">Вероятность разрыва</td>
+                  <td className="py-2 text-slate-400">Вероятность разрыва</td>
                   <td>{Math.round(result.base.gapProbabilityPct)}%</td>
                   <td>{Math.round(result.scenario.gapProbabilityPct)}%</td>
                   <td
                     className={cn(
                       'font-medium',
-                      probDelta > 0 ? 'text-red-600' : probDelta < 0 ? 'text-emerald-600' : 'text-slate-400',
+                      probDelta > 0 ? 'text-rose-400' : probDelta < 0 ? 'text-emerald-400' : 'text-slate-400',
                     )}
                   >
                     {probDelta > 0 ? '+' : ''}
@@ -131,13 +131,13 @@ export default function Sandbox() {
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2 text-slate-600">Сумма разрыва</td>
+                  <td className="py-2 text-slate-400">Сумма разрыва</td>
                   <td>{formatRub(result.base.gapAmount)}</td>
                   <td>{formatRub(result.scenario.gapAmount)}</td>
                   <td
                     className={cn(
                       'font-medium',
-                      amountDelta > 0 ? 'text-red-600' : amountDelta < 0 ? 'text-emerald-600' : 'text-slate-400',
+                      amountDelta > 0 ? 'text-rose-400' : amountDelta < 0 ? 'text-emerald-400' : 'text-slate-400',
                     )}
                   >
                     {formatSignedRub(amountDelta)}
@@ -147,7 +147,7 @@ export default function Sandbox() {
             </table>
           </div>
           <ScenarioCompareChart base={result.base} scenario={result.scenario} />
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-800 p-3 text-xs text-slate-400">
             <Info size={14} className="mt-0.5 shrink-0" />
             <span>Данные песочницы не сохраняются в реальные операции и не влияют на основной прогноз.</span>
           </div>

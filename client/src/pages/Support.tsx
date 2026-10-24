@@ -74,8 +74,8 @@ export default function Support() {
               placeholder="Опишите, что случилось или что нужно уточнить"
             />
           </Field>
-          {sent && <p className="text-xs text-emerald-600">Обращение отправлено и сохранено в БД.</p>}
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {sent && <p className="text-xs text-emerald-400">Обращение отправлено и сохранено в БД.</p>}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
           <Button type="submit" loading={busy}>
             Отправить
           </Button>
@@ -93,11 +93,11 @@ export default function Support() {
         ) : !tickets.data || tickets.data.length === 0 ? (
           <EmptyState title="Обращений пока нет" hint="Здесь появятся ваши заявки в поддержку" />
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-slate-800">
             {tickets.data.map((t) => (
               <li key={t.id} className="py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-800">{t.subject}</p>
+                  <p className="text-sm font-medium text-slate-200">{t.subject}</p>
                   <div className="flex gap-1.5">
                     <Badge tone={t.kind === 'problem' ? 'amber' : 'blue'}>
                       {t.kind === 'problem' ? 'Проблема' : 'Вопрос'}

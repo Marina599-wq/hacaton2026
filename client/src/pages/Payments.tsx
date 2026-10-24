@@ -80,8 +80,8 @@ export default function Payments() {
               className={cn(
                 'rounded-full border px-3 py-1.5 text-xs font-medium',
                 type === t.value
-                  ? 'border-blue-600 bg-blue-50 text-blue-700'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400'
+                  : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600',
               )}
             >
               {t.label}
@@ -109,7 +109,7 @@ export default function Payments() {
           <Field label="Назначение (необязательно)">
             <Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Оплата по договору..." />
           </Field>
-          {error && <p className="text-xs text-red-600 sm:col-span-2">{error}</p>}
+          {error && <p className="text-xs text-rose-400 sm:col-span-2">{error}</p>}
           <div className="sm:col-span-2">
             <Button type="submit" loading={busy}>
               Отправить платёж
@@ -119,12 +119,12 @@ export default function Payments() {
 
         {result && (
           <div className="mt-4 space-y-2">
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-400">
               Платёж принят банком (статус: {result.status}). {formatDate(result.operation.date)} ·{' '}
               {formatRub(result.operation.amount)} записан как расход.
             </div>
             {result.warning?.gapGrows && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
                 <b>Внимание:</b> этот платёж увеличивает кассовый разрыв
                 {result.warning.newGapAmount != null ? ` — новая сумма: ${formatRub(result.warning.newGapAmount)}` : ''}.
               </div>
@@ -141,17 +141,17 @@ export default function Payments() {
           </Button>
         }
       >
-        {pullError && <p className="mb-2 text-xs text-red-600">{pullError}</p>}
+        {pullError && <p className="mb-2 text-xs text-rose-400">{pullError}</p>}
         {pulled == null ? (
           <EmptyState title="Данных пока нет" hint="Заглушка банка вернёт последние операции со счёта" />
         ) : pulled.length === 0 ? (
           <EmptyState title="Операций не найдено" />
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-slate-800">
             {pulled.map((op) => (
               <li key={op.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-800">{op.counterpartyName}</p>
+                  <p className="truncate font-medium text-slate-200">{op.counterpartyName}</p>
                   <p className="truncate text-xs text-slate-500">
                     {formatDate(op.date)} · {op.purpose}
                   </p>
@@ -159,7 +159,7 @@ export default function Payments() {
                 <span
                   className={cn(
                     'font-semibold tabular-nums',
-                    op.direction === 'in' ? 'text-emerald-600' : 'text-red-600',
+                    op.direction === 'in' ? 'text-emerald-400' : 'text-rose-400',
                   )}
                 >
                   {op.direction === 'in' ? '+' : '−'}

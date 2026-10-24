@@ -28,9 +28,9 @@ const SOURCE_LABELS: Record<OperationSource, string> = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 border-b border-slate-100 py-3 last:border-0 sm:flex-row sm:gap-4">
+    <div className="flex flex-col gap-0.5 border-b border-slate-800 py-3 last:border-0 sm:flex-row sm:gap-4">
       <dt className="w-48 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500 sm:pt-0.5">{label}</dt>
-      <dd className="flex-1 text-sm text-slate-800">{children}</dd>
+      <dd className="flex-1 text-sm text-slate-200">{children}</dd>
     </div>
   );
 }
@@ -46,7 +46,7 @@ export default function OperationDetails() {
     <div className="space-y-4">
       <button
         onClick={() => navigate('/history')}
-        className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+        className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200"
       >
         <ArrowLeft size={16} /> Назад к истории
       </button>
@@ -76,7 +76,7 @@ export default function OperationDetails() {
                 <span
                   className={cn(
                     'text-xl font-bold tabular-nums',
-                    op.data.direction === 'in' ? 'text-emerald-600' : 'text-red-600',
+                    op.data.direction === 'in' ? 'text-emerald-400' : 'text-rose-400',
                   )}
                 >
                   {op.data.direction === 'in' ? '+' : '−'}

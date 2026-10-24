@@ -93,11 +93,11 @@ export default function Dashboard() {
   return (
     <div className="space-y-4">
       {actionError && (
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
           <span>{actionError}</span>
           <button
             onClick={() => setActionError(null)}
-            className="shrink-0 text-lg leading-none text-red-400 hover:text-red-600"
+            className="shrink-0 text-lg leading-none text-rose-400 hover:text-rose-300"
             aria-label="Скрыть"
           >
             ×
@@ -115,12 +115,12 @@ export default function Dashboard() {
       {d && (
         <>
           {dashboard.loading && (
-            <div className="h-1 overflow-hidden rounded-full bg-blue-100">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
+            <div className="h-1 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-500" />
             </div>
           )}
           {dashboard.error && !dashboard.loading && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-600">
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
               Ошибка обновления данных: {dashboard.error.message}. Показаны последние загруженные значения.
             </div>
           )}
@@ -141,14 +141,14 @@ export default function Dashboard() {
           <Card
             title="Доходы, расходы и прогноз остатка"
             action={
-              <div className="flex rounded-lg border border-slate-200 p-0.5">
+              <div className="flex rounded-lg bg-slate-800 p-1">
                 {HORIZONS.map((h) => (
                   <button
                     key={h}
                     onClick={() => setHorizon(h)}
                     className={cn(
                       'rounded-md px-2.5 py-1 text-xs font-medium',
-                      horizon === h ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700',
+                      horizon === h ? 'bg-emerald-500 font-medium text-slate-950' : 'text-slate-400 hover:text-slate-200',
                     )}
                   >
                     {h} дн
@@ -199,12 +199,12 @@ export default function Dashboard() {
             ) : !risks.data || risks.data.length === 0 ? (
               <EmptyState title="Рисков пока нет" hint="Добавьте риск вручную — он будет учтён в прогнозе" />
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-slate-800">
                 {risks.data.map((risk) => (
                   <li key={risk.id} className="flex items-center gap-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-medium text-slate-800">{risk.title}</p>
+                        <p className="truncate text-sm font-medium text-slate-200">{risk.title}</p>
                         <Badge tone={risk.source === 'auto' ? 'blue' : 'violet'}>
                           {risk.source === 'auto' ? 'авто' : 'ручной'}
                         </Badge>
@@ -219,7 +219,7 @@ export default function Dashboard() {
                       {risk.source === 'manual' && (
                         <button
                           onClick={() => removeRisk(risk)}
-                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                          className="rounded p-1 text-slate-500 hover:bg-rose-500/10 hover:text-rose-400"
                           title="Удалить риск"
                         >
                           <X size={15} />
@@ -245,22 +245,22 @@ export default function Dashboard() {
             {d.forecast.gapDate ? (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-red-100 text-red-600">
+                  <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-rose-500/15 text-rose-400">
                     <AlertTriangle size={22} />
                   </div>
                   <div>
-                    <p className="text-sm text-slate-600">
-                      Ближайший разрыв — <span className="font-semibold text-slate-900">{formatDate(d.forecast.gapDate)}</span>
+                    <p className="text-sm text-slate-400">
+                      Ближайший разрыв — <span className="font-semibold text-slate-100">{formatDate(d.forecast.gapDate)}</span>
                     </p>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-400">
                       <span>
                         Вероятность:{' '}
-                        <span className="font-semibold text-red-600">
+                        <span className="font-semibold text-rose-400">
                           {Math.round(d.forecast.gapProbabilityPct)}%
                         </span>
                       </span>
                       <span>
-                        Сумма: <span className="font-semibold text-red-600">{formatRub(d.forecast.gapAmount)}</span>
+                        Сумма: <span className="font-semibold text-rose-400">{formatRub(d.forecast.gapAmount)}</span>
                       </span>
                     </div>
                   </div>
@@ -277,17 +277,17 @@ export default function Dashboard() {
             ) : (
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="text-emerald-500" size={22} />
-                <p className="text-sm text-slate-600">На горизонте {d.horizon} дней разрыва не предвидится.</p>
+                <p className="text-sm text-slate-400">На горизонте {d.horizon} дней разрыва не предвидится.</p>
               </div>
             )}
 
             {selfLoans.data && selfLoans.data.items.length > 0 && (
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Активные самозаймы</p>
-                <ul className="divide-y divide-slate-100">
+              <div className="mt-4 border-t border-slate-800 pt-3">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Активные самозаймы</p>
+                <ul className="divide-y divide-slate-800">
                   {selfLoans.data.items.map((op) => (
                     <li key={op.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <span className="text-slate-600">
+                      <span className="text-slate-400">
                         {formatDate(op.date)} · {formatRub(op.amount)} (внесено в счёт)
                       </span>
                       <Button variant="ghost" size="sm" onClick={() => cancelSelfLoan(op.id)}>
@@ -298,7 +298,7 @@ export default function Dashboard() {
                 </ul>
               </div>
             )}
-            {selfLoans.error && <p className="mt-3 text-xs text-red-500">Не удалось загрузить самозаймы</p>}
+            {selfLoans.error && <p className="mt-3 text-xs text-rose-400">Не удалось загрузить самозаймы</p>}
           </Card>
 
           {/* 6. Пункты меню: песочница и календарь (ТЗ §5.2.6) */}
@@ -371,7 +371,7 @@ function SummaryCard({
   tone: 'up' | 'down';
   icon: LucideIcon;
 }) {
-  const cls = tone === 'up' ? 'text-emerald-600' : 'text-red-600';
+  const cls = tone === 'up' ? 'text-emerald-400' : 'text-rose-400';
   return (
     <Card>
       <div className="flex items-center justify-between">
@@ -473,7 +473,7 @@ function AddOperationForm({ onSaved, onCanceled }: { onSaved: () => void; onCanc
       <Field label="Назначение платежа">
         <Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Оплата услуг..." />
       </Field>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onCanceled}>
           Отмена
@@ -568,7 +568,7 @@ function AddRiskForm({ onSaved, onCanceled }: { onSaved: () => void; onCanceled:
       <Field label="Вероятность реализации, %" hint="0–100">
         <Input type="number" min="0" max="100" value={probability} onChange={(e) => setProbability(e.target.value)} />
       </Field>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onCanceled}>
           Отмена
@@ -616,7 +616,7 @@ function SelfLoanForm({
 
   return (
     <form onSubmit={submit} className="space-y-3">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-slate-400">
         Размер разрыва: <b>{formatRub(gapAmount)}</b>
         {gapDate ? ` · дата разрыва: ${formatDate(gapDate)}` : ''}. Внесите собственные средства — прогноз
         пересчитается, разрыв уменьшится.
@@ -624,7 +624,7 @@ function SelfLoanForm({
       <Field label="Сумма из собственных средств" hint={gapDate ? `Зачислится на счёт ${formatDate(gapDate)}` : undefined}>
         <Input type="number" min="1" step="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onCanceled}>
           Отмена
@@ -675,18 +675,18 @@ function ThresholdEditor({ value, onSaved }: { value: number; onSaved: () => voi
         step={1000}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 tabular-nums text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+        className="w-28 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 tabular-nums text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30"
       />
       <span>₽</span>
       <button
         type="button"
         onClick={save}
         disabled={busy}
-        className="rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+        className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
       >
         {busy ? 'Сохраняем…' : 'Сохранить'}
       </button>
-      {msg && <span className={msg === 'Сохранено' ? 'text-emerald-600' : 'text-red-600'}>{msg}</span>}
+      {msg && <span className={msg === 'Сохранено' ? 'text-emerald-400' : 'text-rose-400'}>{msg}</span>}
     </div>
   );
 }

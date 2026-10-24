@@ -1,7 +1,7 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { formatRub } from '@/lib/format';
 
-const PALETTE = ['#2563eb', '#f59e0b', '#22c55e', '#8b5cf6', '#ef4444', '#06b6d4', '#64748b'];
+const PALETTE = ['#34d399', '#10b981', '#059669', '#94a3b8', '#64748b', '#475569', '#f43f5e'];
 
 export function CategoryPie({
   items,
@@ -19,8 +19,17 @@ export function CategoryPie({
             <Cell key={d.key} fill={d.fill} />
           ))}
         </Pie>
-        <Tooltip formatter={(value) => formatRub(Number(value))} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip
+          formatter={(value) => formatRub(Number(value))}
+          contentStyle={{
+            backgroundColor: '#1e293b',
+            border: '1px solid #334155',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#f1f5f9',
+          }}
+        />
+        <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
       </PieChart>
     </ResponsiveContainer>
   );

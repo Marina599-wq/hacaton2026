@@ -21,7 +21,7 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-        checked ? 'bg-blue-600' : 'bg-slate-300',
+        checked ? 'bg-emerald-500' : 'bg-slate-700',
       )}
     >
       <span

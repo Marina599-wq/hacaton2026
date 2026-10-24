@@ -28,3 +28,8 @@ Scope: four confirmed frontend bugs + TZ gaps (threshold T config, statement tem
   CHECK: node client/scripts/verify-tz-p2.mjs
   EXPECT: tz p2 mismatches fixed
   EVIDENCE: automatic-evidence=v1; definition-sha256=1698e2b17b52454a08b8c58540d97f448e9adf6b17ab4c0212a8bda8305512da; exit=0; EXPECT=matched; output-sha256=cf459210b66e83244f9003924677086364af814cbd483b8b2ec15a926ceb7371; output-bytes=421; shell=C:\WINDOWS\system32\cmd.exe; cwd=C:\Users\Admin\hacaton2026; path=ee3755371776/45 entries
+
+- [x] G6: Figma design applied: dark/gray/green palette + Inter (via CSS) + wireframe structure restyled; tsc/build clean
+  CHECK: node client/scripts/verify-design.mjs
+  EXPECT: design pass verified
+  EVIDENCE: pending
