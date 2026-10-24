@@ -1,5 +1,6 @@
 // server/src/controllers/risks.controller.js
 import { prisma } from '../config/db.js';
+import { ApiError } from '../utils/errors.js';
 
 export async function getRisks(req, res, next) {
   try {
@@ -51,7 +52,12 @@ export async function updateRisk(req, res, next) {
     if (probability !== undefined) data.probability = Number(probability);
     if (active !== undefined) data.active = Boolean(active);
 
-    if (Object.keys(data).length === 0) return res.json({ success: true });
+    if (Object.keys(data).length === 0) {
+      // Пустой патч тоже проверяет владение — чужой id даёт 404, а не success (WP-6 §9).
+      const found = await prisma.risk.findFirst({ where: { id, userId: req.user.userId }, select: { id: true } });
+      if (!found) throw ApiError.notFound('Риск не найден');
+      return res.json({ success: true });
+    }
 
     const result = await prisma.risk.updateMany({
       where: { id, userId: req.user.userId },
@@ -59,11 +65,10 @@ export async function updateRisk(req, res, next) {
     });
     // Если риска нет/чужая — 404, а не молчаливый success (frontend ждёт Risk).
     if (result.count === 0) {
-      return res.status(404).json({
-        error: { code: 'NOT_FOUND', message: 'Риск не найден' },
-      });
+      // Чужой/несуществующий id — 404 (WP-6 §9).
+      throw ApiError.notFound('Риск не найден');
     }
-    const risk = await prisma.risk.findUnique({ where: { id } });
+    const risk = await prisma.risk.findFirst({ where: { id, userId: req.user.userId } });
     res.json(risk);
   } catch (err) {
     next(err);
@@ -73,8 +78,10 @@ export async function updateRisk(req, res, next) {
 export async function deleteRisk(req, res, next) {
   try {
     const { id } = req.params;
-    await prisma.risk.deleteMany({ where: { id, userId: req.user.userId } });
-    res.json({ success: true });
+    const found = await prisma.risk.findFirst({ where: { id, userId: req.user.userId }, select: { id: true } });
+    if (!found) throw ApiError.notFound('Риск не найден');
+    await prisma.risk.delete({ where: { id: found.id } });
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

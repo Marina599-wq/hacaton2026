@@ -1,4 +1,4 @@
-import { supportService } from '../services/support.service.js';
+import { prisma } from '../config/db.js';
 import { ApiError } from '../utils/errors.js';
 
 export class SupportController {
@@ -16,10 +16,13 @@ export class SupportController {
         throw ApiError.badRequest('Тип обращения: problem или question');
       }
 
-      const ticket = await supportService.createTicket(userId, {
-        subject: String(subject).slice(0, 200),
-        kind,
-        message: String(message).slice(0, 2000),
+      const ticket = await prisma.supportTicket.create({
+        data: {
+          userId,
+          subject: String(subject).slice(0, 200),
+          kind,
+          message: String(message).slice(0, 2000),
+        },
       });
       res.status(201).json(ticket);
     } catch (err) {
@@ -33,7 +36,10 @@ export class SupportController {
       const userId = req.user?.userId;
       if (!userId) throw ApiError.unauthorized();
 
-      const tickets = await supportService.listTickets(userId);
+      const tickets = await prisma.supportTicket.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      });
       res.json(tickets);
     } catch (err) {
       next(err);

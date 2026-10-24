@@ -2,7 +2,20 @@
 import { prisma } from '../config/db.js';
 import { anonymizeCounterparty } from '../utils/anonymizer.js';
 import { parseBankStatement } from '../utils/parser.js';
+import { maskName, maskInn } from '../utils/masking.js';
 import { ApiError } from '../utils/errors.js';
+
+/**
+ * Обезличивание в ответах (WP-6 §10): контрагенты идут через maskName/maskInn.
+ */
+function maskOperation(op) {
+  if (!op) return op;
+  return {
+    ...op,
+    counterpartyName: maskName(op.counterpartyName),
+    counterpartyInn: maskInn(op.counterpartyInn),
+  };
+}
 
 /**
  * Фильтр по категории в терминах UI:
@@ -44,7 +57,7 @@ export async function getOperations(req, res, next) {
       take: parseInt(limit, 10)
     });
 
-    res.json(operations);
+    res.json(operations.map(maskOperation));
   } catch (err) {
     next(err);
   }
@@ -85,13 +98,13 @@ export async function createOperation(req, res, next) {
         category: category || (direction === 'in' ? 'income' : 'expense'),
         counterpartyName: name,
         counterpartyInn: inn,
-        purpose,
+        purpose: purpose || '',
         balanceEndOfDay: newBalance,
         source: 'manual'
       }
     });
 
-    res.status(201).json(operation);
+    res.status(201).json(maskOperation(operation));
   } catch (err) {
     next(err);
   }
@@ -105,7 +118,7 @@ export async function getOperationById(req, res, next) {
     });
     if (!operation) return res.status(404).json({ error: { message: 'Операция не найдена' } });
 
-    res.json(operation);
+    res.json(maskOperation(operation));
   } catch (err) {
     next(err);
   }
