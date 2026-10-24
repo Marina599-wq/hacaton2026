@@ -127,7 +127,7 @@ export default function History() {
               ) : groups.length === 0 ? (
                 <EmptyState title="Нет данных за этот месяц" />
               ) : (
-                <CategoryPie items={pieItems} />
+                <CategoryPie key={`${month}-${groups.length}`} items={pieItems} />
               )}
             </Card>
           </div>

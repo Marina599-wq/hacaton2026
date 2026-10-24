@@ -38,3 +38,10 @@ Scope: four confirmed frontend bugs + TZ gaps (threshold T config, statement tem
   CHECK: node client/scripts/verify-history-pie.mjs
   EXPECT: history pie gate passed
   EVIDENCE: manual-evidence=v1; check=node client/scripts/verify-history-pie.mjs; exit=0; output="history pie gate passed (5/5 checks)"; visual=390px+1440px browser: 5 sectors rendered with distinct fills, per-slice tooltips verified (Доход 53%, Зарплата 21%, Платёж 12%, Прочее 1%, всего 858 000,00 ₽), no horizontal overflow at 390px; tsc+eslint clean
+
+- [ ] G8: addendum (ТЗ-доп.): planned events + integrations + counterparty registries:
+  Prisma PlannedEvent model; sync endpoints 1c/edo/tax-calendar/marketplace; tax calendar (ЕНП 30%/65k base, quarterly 6%/50% cap, demo floor 150k->180k);
+  counterparty classification (12/99/66 high 0.75, 44/55/77 medium 0.45) + auto Risk; forecast de-dup tax + MC 21d delays; UI: IntegrationsPanel/PlannedEventsSection/PlannedEventModal/CounterpartyShield on Payments
+  CHECK: node client/scripts/verify-addendum.mjs && npx vitest run (server/tests: plannedEvents + forecast)
+  EXPECT: addendum checks 49/49 ok; backend tests all green
+  EVIDENCE: verify-addendum.mjs 49/49 ok; server vitest 30/30 (plannedEvents.test.js 10 + forecast.test.js 13 + parser + anonymizer); live API: sync 1c/edo/tax-calendar/marketplace → 201 (2+2+4+1), planned-events summary {in 444500, out 2133081, taxes 1978081, highRiskIn 250000}, counterparty?inn=77******12 → high p=0.75, auto Risk 250000@0.75 created, contract 100k p=30% split into 30k prepay + 70k postpay, dashboard forecastSeries reasons type=planned present; UI headless 390px: IntegrationsPanel+section render, sync feedback "Синхронизировано", modal POST 201 + event shown; tsc/eslint/vite build clean; test events cleaned from dev.db

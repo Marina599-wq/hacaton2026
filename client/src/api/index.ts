@@ -8,15 +8,21 @@ import type {
   BankPaymentResponse,
   CalendarDay,
   CreateOperationRequest,
+  CreatePlannedEventRequest,
   CreateRiskRequest,
   CreateTicketRequest,
+  CounterpartyCheckResult,
   DashboardResponse,
   CalendarResponse,
   HistoryCategory,
   HistorySummary,
   Horizon,
+  IntegrationProvider,
+  IntegrationSyncResult,
   Operation,
   Paged,
+  PlannedEvent,
+  PlannedEventsResponse,
   Risk,
   SandboxSimulateRequest,
   SandboxSimulateResponse,
@@ -25,8 +31,8 @@ import type {
   ForecastPoint,
 } from '@/types/api';
 
-function qs(params: Record<string, string | number | undefined>): string {
-  const entries = Object.entries(params).filter(
+function qs(params: Record<string, string | number | undefined> | null | undefined): string {
+  const entries = Object.entries(params ?? {}).filter(
     ([, v]) => v !== undefined && v !== '',
   );
   if (entries.length === 0) return '';
@@ -176,5 +182,22 @@ export const api = {
   support: {
     createTicket: (body: CreateTicketRequest) => http.post<SupportTicket>('/support/tickets', body),
     listTickets: () => http.get<SupportTicket[]>('/support/tickets'),
+  },
+  plannedEvents: {
+    list: (q?: { type?: string; source?: string }) =>
+      http.get<PlannedEventsResponse>(`/planned-events${qs((q ?? {}) as Record<string, string | undefined>)}`),
+    create: (body: CreatePlannedEventRequest) => http.post<{ events: PlannedEvent[] }>('/planned-events', body),
+    patch: (id: string, body: { status?: string; active?: boolean }) =>
+      http.patch<{ event: PlannedEvent }>(`/planned-events/${id}`, body),
+  },
+  integrations: {
+    sync: (provider: IntegrationProvider) =>
+      http.post<IntegrationSyncResult>(`/integrations/${provider}/sync`),
+    /** Убрать синхронизацию источника: удалить его незакрытые (pending) плановые события. */
+    unsync: (provider: IntegrationProvider) =>
+      http.del<{ ok: boolean; provider: IntegrationProvider; removed: number }>(`/integrations/${provider}/sync`),
+  },
+  counterparty: {
+    check: (inn: string) => http.get<CounterpartyCheckResult>(`/counterparty${qs({ inn })}`),
   },
 };

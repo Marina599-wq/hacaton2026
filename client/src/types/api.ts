@@ -45,6 +45,74 @@ export interface CreateRiskRequest {
   active?: boolean;
 }
 
+// ---------- Плановые события и интеграции (ТЗ-доп.) ----------
+
+export type PlannedEventType = 'contract' | 'invoice' | 'tax';
+export type PlannedEventStatus = 'pending' | 'paid' | 'overdue';
+export type CounterpartyRisk = 'low' | 'medium' | 'high';
+
+export interface PlannedEvent {
+  id: string;
+  type: PlannedEventType;
+  title: string;
+  amount: number;
+  direction: Direction;
+  expectedDate: string; // ISO
+  issueDate?: string | null;
+  deferralDays: number;
+  prepaymentPct?: number | null;
+  counterpartyName?: string | null;
+  counterpartyInn?: string | null;
+  counterpartyRisk: CounterpartyRisk;
+  source: '1c' | 'edo' | 'ofd' | 'marketplace' | 'tax_calendar' | 'manual';
+  status: PlannedEventStatus;
+  active: boolean;
+}
+
+export interface PlannedEventsResponse {
+  events: PlannedEvent[];
+  summary: {
+    totalExpectedIn: number;
+    totalExpectedOut: number;
+    upcomingTaxes: number;
+    overdueCount: number;
+    highRiskInAmount: number;
+  };
+}
+
+export interface CreatePlannedEventRequest {
+  type: PlannedEventType;
+  title: string;
+  amount: number;
+  direction: Direction;
+  expectedDate: string; // YYYY-MM-DD
+  issueDate?: string;
+  deferralDays?: number;
+  prepaymentPct?: number;
+  counterpartyName?: string | null;
+  counterpartyInn?: string | null;
+}
+
+export interface CounterpartyCheckResult {
+  inn: string | null;
+  status: 'ACTIVE' | 'LIQUIDATION' | 'BANKRUPT';
+  taxDebts: number;
+  bankruptcy: boolean;
+  riskLevel: CounterpartyRisk;
+  badgeText: string;
+  detailsText: string;
+  delayProbability: number;
+}
+
+export type IntegrationProvider = '1c' | 'edo' | 'tax-calendar' | 'marketplace';
+
+export interface IntegrationSyncResult {
+  ok: boolean;
+  provider: IntegrationProvider;
+  label: string;
+  created: number;
+}
+
 export interface ForecastPoint {
   date: string;
   income: number;

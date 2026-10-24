@@ -1,5 +1,6 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { formatRub } from '@/lib/format';
+import './category-pie.css';
 
 /**
  * Палитра «In Color Balance»: шалфей и олива для доходных категорий,
@@ -44,6 +45,7 @@ export function CategoryPie({
 }) {
   const data = items.map((it, i) => ({ ...it, fill: PALETTE[i % PALETTE.length] }));
   return (
+    <div className="category-pie-enter">
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
         <Pie
@@ -55,7 +57,10 @@ export function CategoryPie({
           paddingAngle={3}
           stroke="#1f2024"
           strokeWidth={2}
-          isAnimationActive={false}
+          isAnimationActive
+          animationBegin={120}
+          animationDuration={800}
+          animationEasing="ease-out"
         >
           {data.map((d) => (
             <Cell key={d.key} fill={d.fill} />
@@ -71,5 +76,6 @@ export function CategoryPie({
         />
       </PieChart>
     </ResponsiveContainer>
+    </div>
   );
 }

@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { Button, Card, EmptyState, Field, Input } from '@/components/ui';
+import { IntegrationsPanel } from '@/components/IntegrationsPanel';
+import { PlannedEventsSection } from '@/components/PlannedEventsSection';
+import { PlannedEventModal } from '@/components/PlannedEventModal';
 import { cn } from '@/lib/cn';
 import { currentMonth, formatDate, formatRub, shiftMonth, todayISO } from '@/lib/format';
 import type { BankPaymentResponse, BankPaymentType, Operation } from '@/types/api';
@@ -15,6 +18,11 @@ const TYPES: Array<{ value: BankPaymentType; label: string }> = [
 ];
 
 export default function Payments() {
+  // key — пересоздаёт секцию после внешних изменений (синхронизация, добавление)
+  const [eventsVersion, setEventsVersion] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
+  const bumpEvents = () => setEventsVersion((v) => v + 1);
+
   const [type, setType] = useState<BankPaymentType>('tax');
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
@@ -98,6 +106,12 @@ export default function Payments() {
 
   return (
     <div className="space-y-4">
+      <IntegrationsPanel onSynced={bumpEvents} />
+      <PlannedEventsSection key={eventsVersion} onAdd={() => setModalOpen(true)} />
+      {modalOpen && (
+        <PlannedEventModal onClose={() => setModalOpen(false)} onCreated={bumpEvents} />
+      )}
+
       <Card title="Новый платёж (заглушка банка)">
         <div className="mb-3 flex flex-wrap gap-2">
           {TYPES.map((t) => (
