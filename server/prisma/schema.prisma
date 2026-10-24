@@ -1,0 +1,77 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  companyName  String
+  inn          String
+  minBalance   Float    @default(0)
+  createdAt    DateTime @default(now())
+  
+  operations   Operation[]
+  risks        Risk[]
+  tickets      SupportTicket[]
+  scenarios    SandboxScenario[]
+}
+
+model Operation {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date             DateTime
+  amount           Float             // всегда положительное
+  direction        String            // "in" | "out"
+  category         String            // "income" | "expense" | "payment" | "tax" | "salary" | "other"
+  counterpartyName String            // хранится обезличенным
+  counterpartyInn  String            // хранится обезличенным
+  purpose          String
+  balanceEndOfDay  Float
+  source           String            // "import" | "manual" | "bank_stub" | "self_loan" | "bank_loan" | "payment"
+  createdAt        DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model Risk {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  type        String            // "income_loss" | "unplanned_expense"
+  amount      Float
+  dateFrom    DateTime
+  dateTo      DateTime?
+  probability Float             // 0..1
+  source      String            // "auto" | "manual"
+  active      Boolean  @default(true)
+}
+
+model SupportTicket {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject   String
+  kind      String            // "problem" | "question"
+  message   String
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+}
+
+model SandboxScenario {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  amount    Float
+  date      DateTime
+  repeats   Int      @default(1)
+  createdAt DateTime @default(now())
+}
