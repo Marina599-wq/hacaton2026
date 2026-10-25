@@ -58,18 +58,57 @@ test('выводы владельцем не уводят остаток ниж�
       ? op(date, 400_000, 'out', 'Перевод собственных средств на личную карту', { bal: 1_000_000 })
       : op(date, 20_000, 'in', 'Выручка', { bal: 1_000_000 });
   });
-  const r = calculateForecast(ops, [], 300_000, 30, 0, { today: TODAY });
+  // Волна C: дефолт ownerWithdrawalsEnabled переключён на false (решение по абляциям — см. forecast.config.js);
+  // поведение компонента проверяется с явным включением
+  const r = calculateForecast(ops, [], 300_000, 30, 0, { today: TODAY, config: { ownerWithdrawalsEnabled: true } });
   assert.ok(r.forecastSeries.every((p) => p.balance >= 0)); // вывод ограничен остатком над полом
   assert.ok(r.forecastSeries.some((p) => p.ownerWithdrawal === 0));
   assert.ok(r.dataQuality.warnings.some((w) => w.includes('выводы')));
 });
 
-test('probableGapDate есть тогда и только тогда, когда вероятность ≥ порога', () => {
+test('волна C: выводы владельцем отключены по умолчанию (решение по абляциям, см. MODEL_COMPARISON.md)', () => {
+  const ops = Array.from({ length: 150 }, (_, i) => {
+    const date = new Date(Date.UTC(2026, 4, 1) + i * 86_400_000).toISOString().slice(0, 10);
+    return i % 7 === 4
+      ? op(date, 400_000, 'out', 'Перевод собственных средств на личную карту', { bal: 1_000_000 })
+      : op(date, 20_000, 'in', 'Выручка', { bal: 1_000_000 });
+  });
+  const r = calculateForecast(ops, [], 300_000, 30, 0, { today: TODAY });
+  assert.equal(Math.max(...r.forecastSeries.map((p) => p.ownerWithdrawal)), 0);
+});
+
+test('probableGapDate — по сырой накопленной кривой ≥ порога (headline-вероятность перекалибрована, см. тест ниже)', () => {
   const ops = [...background(), ...monthly(10, 80_000, 'Аренда')];
   for (const T of [0, 200_000, 600_000, 5_000_000]) {
     const r = calculateForecast(ops, [], 500_000, 30, T, { today: TODAY });
-    assert.equal(r.probableGapDate !== null, r.gapProbabilityPct >= 50, `T=${T}`);
+    assert.equal(r.probableGapDate !== null, (r.cumulativeGapProbabilityByDay?.at(-1) ?? 0) >= 50, `T=${T}`);
   }
+});
+
+test('волна C: вероятность разрыва перекалибрована по бэктесту (кусочно-постоянная сетка, G-A2)', () => {
+  const ops = [...background(), ...monthly(10, 80_000, 'Аренда')];
+  // сырая вероятность 100 % (T = 600 000) → калиброванная константа изотонической сетки PAV (1/39 ≈ 2,6 %)
+  const r = calculateForecast(ops, [], 500_000, 30, 600_000, { today: TODAY });
+  assert.equal(r.gapProbabilityPct, 2.6);
+  // ни один прогон не пробил порог (T = 0) → 0, а не выдуманное 2,6 %
+  const zero = calculateForecast(ops, [], 500_000, 30, 0, { today: TODAY });
+  assert.equal(zero.gapProbabilityPct, 0);
+  // mcDisabled (короткая история) — вероятность не считается вовсе
+  const short = calculateForecast(background().slice(-20), [], 100_000, 30, 0, { today: TODAY, mcDisabled: true });
+  assert.equal(short.gapProbabilityPct, null);
+});
+
+test('волна C: устаревшая выписка (today >> последней операции) — уровень «stale» и предупреждение (G-A5)', () => {
+  const ops = [{ date: '2026-01-01', amount: 1000, direction: 'out', balanceEndOfDay: 100_000, purpose: 'x' }];
+  const r = calculateForecast(ops, [], 100_000, 30, 0, { today: '2027-01-30' });
+  assert.equal(r.dataQuality.level, 'stale');
+  assert.ok(r.dataQuality.warnings.some((w) => w.includes('устарел')), JSON.stringify(r.dataQuality.warnings));
+});
+
+test('волна C: свежая выписка (последняя операция = опорная дата) — без уровня «stale»', () => {
+  const r = calculateForecast(background(), [], 500_000, 30, 0, { today: TODAY });
+  assert.notEqual(r.dataQuality.level, 'stale');
+  assert.equal(r.dataQuality.warnings.filter((w) => w.includes('устарел')).length, 0);
 });
 
 test('риск: включённый ухудшает, выключенный не влияет; займ уменьшает разрыв, его возврат — увеличивает', () => {

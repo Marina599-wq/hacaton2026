@@ -1,5 +1,5 @@
 # CI: push/PR → сервер (тесты + ESLint) и клиент (tsc + ESLint + Vite build).
-# Прогоняется локальным `npm run ci-check` (см. G18); на GitHub — автоматом.
+# Локально те же шаги: npm test, npm run lint, npm run build (корень).
 name: CI
 
 on:
@@ -19,6 +19,9 @@ jobs:
       - name: prisma generate
         working-directory: server
         run: npx prisma generate
+      - name: prisma migrate deploy
+        working-directory: server
+        run: npx prisma migrate deploy
       - name: tests
         working-directory: server
         run: npx vitest run

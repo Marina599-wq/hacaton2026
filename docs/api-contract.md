@@ -14,7 +14,7 @@
 | `INVALID_CREDENTIALS` | 401 | неверный email/пароль при `/auth/login` |
 | `UNAUTHORIZED` | 403 | нет доступа к ресурсу (чужие данные) |
 | `NOT_FOUND` | 404 | ресурс не найден |
-| `VALIDATION` | 422 | ошибка валидации (в message — поле) |
+| `VALIDATION` | 400/422 | ошибка валидации (в message — поле): 400 — body/query (например, horizon), 422 — файл/колонки при импорте |
 | `RISK_NOT_DELETABLE` | 400 | попытка удалить авто-риск |
 | `FILE_INVALID` | 422 | файл выписки: формат/размер/колонки |
 | `RATE_LIMITED` | 429 | rate limit: 300 запросов / мин на `/api/*`, 10 / мин на `/auth/*` |
@@ -91,7 +91,7 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 
 Порядок колонок произвольный. Неизвестные колонки / битая строка → `422 FILE_INVALID` (message с указанием строки).
 
-### GET /dashboard?horizon=30|60|90 (по умолчанию 90)
+### GET /dashboard?horizon=30|60|90 (по умолчанию 30)
 
 ```json
 {
@@ -135,8 +135,9 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 - `asOf` (top-level, дублируется в `dataQuality.asOf`): опорная дата прогноза (ТЗ-доработка §9):
   свежая выписка (≤ 3 дн.) — текущая дата, старая — последняя дата выписки; `FORECAST_AS_OF`
   из `server/.env` применяется только к демо-учётке `demo@cashflow.ru`.
-- `meta.computed` (ТЗ-доработка WP-8 п.7): `"full"` или `"incremental"` + время расчёта в мс.
-  Минимальная реализация: инкрементальное состояние не введено → всегда `"full"`.
+- `meta.computed` (ТЗ-доработка WP-8 п.7): сейчас всегда `"full"` + время расчёта в мс.
+  Инкрементальное обновление без полного пересчёта (`"incremental"`, состояние `ForecastState`)
+  — только в «планах развития» (docs/ARCHITECTURE.md §8), не реализовано.
 - `dataQuality` — слитое поле качества (ТЗ-доработка §1, §10): уровень ядра (`level`),
   пропуски (`gapsDays`, `gaps`), пустые ИНН/назначения, овердрафт (`overdraftDays`) —
   из него клиент рендерит алерты; `historyLevel: "insufficient"` при истории < 14 дней
@@ -386,6 +387,12 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 Топ-5 контрагентов по доле в поступлениях за последние 6 месяцев:
 → `200 { clients: [{ inn, name, totalIn6m, sharePct }], windowMonths: 6 }` — для prefill в `client_delay`.
 
+### GET /scenarios/defaults
+
+Дефолт параметра `unplanned_expense.amount` из истории (отчёт §8.4):
+→ `200 { unplannedExpense: { amount, basis: "history_median" } | null }` —
+amount = медиана unplanned_* списаний (нет истории → `null`, ввод «с нуля»).
+
 ## ТЗ-доработка WP-5: график «План-факт»
 
 ### GET /plan-fact?days=30|60|90&granularity=day|week
@@ -397,6 +404,18 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 где `significant = true`, если `|factNet − planNet| ≥ max(10 % от |planNet|, 10 000 ₽)`.
 Если до `cut` меньше 90 дней истории — `400 { error: { code: 'VALIDATION', message } }`.
 
+### GET /plan-fact/gap-breakdown?days=30|60|90
+
+Разбивка «из чего складывается нехватка» на горизонте (показывается на Главной рядом с найденным разрывом):
+обязательные платежи (PlannedEvent pending/overdue) / внеплановые резервы (unplanned_* за 12 мес.) / ожидаемые поступления.
+
+```json
+{ "days": 30, "asOf": "2026-09-29", "mandatoryOut": 1400000, "mandatoryCount": 5, "expectedIn": 150487.8, "expectedInCount": 1, "unplannedReserve": 900000, "unplannedBasis": "sum_12m", "unplannedCount": 1 }
+```
+
+- `unplannedBasis`: `sum_12m` — сумма unplanned_* списаний за 12 мес.; `median_fallback_12m` — медиана всех списаний (нет unplanned_*).
+- `unplannedReserve` — `null`, если истории < 3 списаний.
+
 Статусы плановых событий сверки (`pending` / `paid` / `partial` / `paid_late` / `overdue`)
 обновляются автоматически: перед `GET /dashboard`, `GET /planned-events` и после
 `POST /operations`, импорта выписки/пакетного импорта и `GET /bank/transactions`.
@@ -407,8 +426,13 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 ## Демо-данные
 
 Seed создаёт демо-учётку `demo@cashflow.ru / demo1234` (контракт) — выписки берутся из
-`test-data/demo/` (3 файла, по одной компании из разных видов бизнеса; выбирает
-`server/scripts/pick-demo.mjs`, ТЗ-доработка п.13), а не из генератора.
+`test-data/demo/` (сейчас 1 демо-выписка `statement-demo-C001.csv`; механика выбора
+`server/scripts/pick-demo.mjs` готова под датасет организаторов — 150 компаний / 15 видов:
+после подстановки в `test-data/statements/` добавятся 2–3 компании с реальным разрывом;
+ТЗ-доработка п.13), а не из генератора. Seed также задаёт демо-учётке порог разрыва
+T = P25-квантиль остатков выписки и плановые события (договор, счёт, налог, просроченный
+платёж) — на C001/asOf=2026-09-29 на главной виден будущий разрыв (docs/BACKTEST.md:
+на C001 разрыв случился при пороге P25).
 `FORECAST_AS_OF` в `server/.env` = последняя дата демо-выписки — применяется **только**
 к демо-учётке (у обычных пользователей `asOf` берётся из их выписки, ТЗ-доработка §9).
 Кнопка «Использовать демо-данные» → `POST /demo` (см. `test-data/README.md`).

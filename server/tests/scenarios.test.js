@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { calculateForecast } from '../src/services/forecast.service.js';
 import { parseScenarios, SCENARIO_TYPES } from '../src/services/forecast.scenarios.js';
+import { unplannedExpenseMedian } from '../src/services/scenario.service.js';
 
 const TODAY = '2026-10-01';
 const SEED = 42;
@@ -145,5 +146,33 @@ describe('WP-4: негативные сценарии (options.scenarios в яд
     ]);
     // Сценарий хуже базы: пробитие/минимум не лучше
     expect(scen.minForecastBalance).toBeLessThanOrEqual(baseFc.minForecastBalance + 0.01);
+  });
+});
+
+describe('WP-6: дефолт unplanned_expense из истории (отчёт §8.4)', () => {
+  it('медиана unplanned_* списаний — дефолт (вместо «с нуля»)', () => {
+    const ops = [
+      { direction: 'out', amount: 5000, plannedness: 'unplanned_operational' },
+      { direction: 'out', amount: 20000, plannedness: 'unplanned_capex' },
+      { direction: 'out', amount: 10000, plannedness: 'unplanned_operational' },
+      { direction: 'out', amount: 90000, plannedness: 'planned_fixed' }, // не unplanned — не считаем
+      { direction: 'in', amount: 4000, plannedness: 'unplanned_operational' }, // не расход — не считаем
+    ];
+    // медиана [5000, 10000, 20000] = 10000
+    expect(unplannedExpenseMedian(ops)).toBe(10000);
+  });
+
+  it('нет unplanned_* в истории — null (текущее поведение: ручной ввод)', () => {
+    const ops = [{ direction: 'out', amount: 5000, plannedness: 'planned_fixed' }];
+    expect(unplannedExpenseMedian(ops)).toBe(null);
+    expect(unplannedExpenseMedian([])).toBe(null);
+  });
+
+  it('чётное число значений — среднее двух средних', () => {
+    const ops = [
+      { direction: 'out', amount: 4000, plannedness: 'unplanned_operational' },
+      { direction: 'out', amount: 8000, plannedness: 'unplanned_capex' },
+    ];
+    expect(unplannedExpenseMedian(ops)).toBe(6000);
   });
 });

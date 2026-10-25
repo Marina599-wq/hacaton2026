@@ -33,6 +33,19 @@ export interface Operation {
   purpose: string;
   balanceEndOfDay: number;
   source: OperationSource;
+  /** Класс плановости (отчёт §8.2): planned_fixed / planned_scheduled / recurring_variable /
+   *  unplanned_operational / unplanned_capex / owner_discretionary / non_expense; null — не классифицирована. */
+  plannedness?:
+    | 'planned_fixed'
+    | 'planned_scheduled'
+    | 'recurring_variable'
+    | 'unplanned_operational'
+    | 'unplanned_capex'
+    | 'owner_discretionary'
+    | 'non_expense'
+    | null;
+  plannednessConfidence?: number | null;
+  plannednessSource?: 'rule' | 'recurrence' | 'plan_match' | 'manual' | null;
 }
 
 export type RiskType = 'income_loss' | 'unplanned_expense';
@@ -194,12 +207,28 @@ export interface DashboardResponse {
 // ТЗ-доработка WP-5: предупреждения на главной
 export interface DashboardAlert {
   id: string;
-  type: 'planned_overdue' | 'regular_missing' | 'gap_forecast';
+  type: 'planned_overdue' | 'regular_missing' | 'gap_forecast' | 'unplanned_payment';
   severity: 'warning' | 'critical';
   title: string;
   message: string;
   date: string;
   amount: number | null;
+}
+
+/** Разбивка «из чего складывается нехватка» рядом с разрывом (отчёт §8.4, минимум §8.7). */
+export interface GapBreakdown {
+  days: number;
+  asOf: string;
+  /** Обязательные платежи: ближайшие PlannedEvent-списания (pending/overdue) */
+  mandatoryOut: number;
+  mandatoryCount: number;
+  /** Ожидаемые поступления: ближайшие PlannedEvent-приход */
+  expectedIn: number;
+  expectedInCount: number;
+  /** Внеплановые резервы: сумма unplanned_* за 12 мес. (нет истории — медиана списаний) */
+  unplannedReserve: number | null;
+  unplannedBasis: 'sum_12m' | 'median_fallback_12m' | null;
+  unplannedCount: number;
 }
 
 export interface Paged<T> {

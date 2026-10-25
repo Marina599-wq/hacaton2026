@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { PrismaClient } from '@prisma/client';
 import { ApiError } from '../utils/errors.js';
-import { categoryWhere } from '../controllers/operations.controller.js';
+import { categoryWhere, RECURRING_PLANNEDNESS } from '../controllers/operations.controller.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -14,9 +14,11 @@ router.get('/summary', async (req, res, next) => {
     const userId = req.user?.userId;
     if (!userId) throw new ApiError(401, 'Неавторизован');
 
-    const { month, category } = req.query;
+    const { month, category, recurring } = req.query;
     const where = { userId };
     if (category) Object.assign(where, categoryWhere(category));
+    // Фильтр «Повторяющиеся платежи» (отчёт §8.2): диаграмма учитывает тот же класс, что и список
+    if (String(recurring) === 'true') where.plannedness = { in: RECURRING_PLANNEDNESS };
     if (month && /^\d{4}-\d{2}$/.test(String(month))) {
       const [year, m] = String(month).split('-').map(Number);
       where.date = {

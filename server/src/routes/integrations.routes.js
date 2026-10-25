@@ -1,12 +1,11 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../config/db.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { ApiError } from '../utils/errors.js';
 import { syncProvider, unsyncProvider, checkCounterpartyRoute } from '../controllers/integrations.controller.js';
 import { syncTaxCalendar } from '../controllers/plannedEvents.controller.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.use(authMiddleware);
 

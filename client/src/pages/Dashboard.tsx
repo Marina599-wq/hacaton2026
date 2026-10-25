@@ -32,7 +32,7 @@ import {
 import { ForecastChart } from '@/components/charts/ForecastChart';
 import { cn } from '@/lib/cn';
 import { formatDate, formatRub, todayISO } from '@/lib/format';
-import type { Direction, Horizon, Risk, RiskType, Subcategory } from '@/types/api';
+import type { Direction, GapBreakdown, Horizon, Risk, RiskType, Subcategory } from '@/types/api';
 import { PlanFactCard } from '@/components/PlanFactCard';
 
 const HORIZONS: Horizon[] = [30, 60, 90];
@@ -55,6 +55,16 @@ export default function Dashboard() {
   const selfLoans = useAsync(() => api.gap.selfLoans(), []);
 
   const d = dashboard.data;
+
+  // Отчёт §8.4: разбивка «из чего складывается нехватка» рядом с найденным разрывом (минимум §8.7)
+  const gapBreakdown = useAsync(async (): Promise<GapBreakdown | null> => {
+    if (!d?.forecast.gapDate) return null;
+    try {
+      return await api.planFact.gapBreakdown(d.horizon as Horizon);
+    } catch {
+      return null; // endpoint ещё не отдаёт данные — разбивку не показываем
+    }
+  }, [d?.forecast?.gapDate, d?.horizon]);
 
   function refreshAll() {
     dashboard.refetch();
@@ -374,6 +384,34 @@ export default function Dashboard() {
               </div>
             )}
             {selfLoans.error && <p className="mt-3 text-xs text-rose-400">Не удалось загрузить самозаймы</p>}
+
+            {/* Отчёт §8.4: из чего складывается нехватка — минимум §8.7 (обязательные / внеплановые / ожидаемые) */}
+            {d.forecast.gapDate && gapBreakdown.data && (
+              <div className="mt-4 border-t border-slate-800 pt-3">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Из чего складывается нехватка</p>
+                <ul className="space-y-1 text-sm text-slate-400">
+                  <li>
+                    Обязательные платежи:{' '}
+                    <span className="font-semibold text-slate-200">{formatRub(gapBreakdown.data.mandatoryOut)} ₽</span>{' '}
+                    ({gapBreakdown.data.mandatoryCount} плановых событий на {gapBreakdown.data.days} дн.)
+                  </li>
+                  <li>
+                    Внеплановые резервы:{' '}
+                    <span className="font-semibold text-slate-200">
+                      {gapBreakdown.data.unplannedReserve != null ? `${formatRub(gapBreakdown.data.unplannedReserve)} ₽` : '—'}
+                    </span>
+                    {gapBreakdown.data.unplannedBasis === 'median_fallback_12m' && (
+                      <span className="ml-1 text-xs text-slate-500">оценка по медиане, истории unplanned_* нет</span>
+                    )}
+                  </li>
+                  <li>
+                    Ожидаемые поступления:{' '}
+                    <span className="font-semibold text-slate-200">{formatRub(gapBreakdown.data.expectedIn)} ₽</span> (
+                    {gapBreakdown.data.expectedInCount} событий)
+                  </li>
+                </ul>
+              </div>
+            )}
           </Card>
 
           {/* 6. План-факт (ТЗ-доработка WP-5): график + просроченные ожидания из alerts */}

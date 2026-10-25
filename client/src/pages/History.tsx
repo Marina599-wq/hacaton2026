@@ -33,31 +33,46 @@ export default function History() {
   const [category, setCategory] = useState<HistoryCategory>('');
   // ТЗ-доработка WP-3: фильтр «Не категоризовано»
   const [uncategorized, setUncategorized] = useState(false);
+  // Отчёт §8.2: фильтр «Повторяющиеся платежи» (по классам плановости из импорта)
+  const [recurring, setRecurring] = useState(false);
   const [page, setPage] = useState(1);
   const [slideDir, setSlideDir] = useState<'next' | 'prev' | null>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
-  const summary = useAsync(() => api.history.summary({ month, category }), [month, category]);
+  const summary = useAsync(
+    () => api.history.summary({ month, category, recurring: recurring || undefined }),
+    [month, category, recurring],
+  );
   const ops = useAsync(
     () =>
       api.operations.list({
         month,
         category: category || undefined,
         uncategorized: uncategorized || undefined,
+        recurring: recurring || undefined,
         page,
         limit: LIMIT,
       }),
-    [month, category, uncategorized, page],
+    [month, category, uncategorized, recurring, page],
   );
 
   function changeCategory(c: HistoryCategory) {
     setCategory(c);
     setUncategorized(false);
+    setRecurring(false);
     setPage(1);
   }
 
   function toggleUncategorized() {
     setUncategorized((v) => !v);
+    setRecurring(false);
+    setCategory('');
+    setPage(1);
+  }
+
+  function toggleRecurring() {
+    setRecurring((v) => !v);
+    setUncategorized(false);
     setCategory('');
     setPage(1);
   }
@@ -130,6 +145,19 @@ export default function History() {
             )}
           >
             Не категоризовано
+          </button>
+          {/* Отчёт §8.2: фильтр «Повторяющиеся платежи» (по классам плановости) */}
+          <button
+            type="button"
+            onClick={toggleRecurring}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium',
+              recurring
+                ? 'border-emerald-500 bg-emerald-500 text-slate-950'
+                : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600',
+            )}
+          >
+            Повторяющиеся платежи
           </button>
         </div>
       </div>

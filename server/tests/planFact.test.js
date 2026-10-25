@@ -6,7 +6,7 @@
 //    возвращает прогноз, где событие сдвинуто на today + plannedOverdueShiftDays,
 //    и массив alerts с типом planned_overdue.
 import { describe, it, expect } from 'vitest';
-import { reconcile } from '../src/services/planFact.service.js';
+import { reconcile, buildPlanFactAlerts } from '../src/services/planFact.service.js';
 import { FORECAST_CONFIG } from '../src/config/forecast.config.js';
 
 const CFG = {
@@ -150,4 +150,65 @@ describe('GET /api/dashboard — пересчёт с просрочкой (ТЗ 
     await prisma.operation.deleteMany({ where: { userId: user.id } });
     await prisma.user.delete({ where: { id: user.id } });
   }, 60_000);
+});
+
+describe('WP-6 плановость + asOf (отчёт §8.4 / 3.2)', () => {
+  const asOf = new Date('2026-10-25');
+
+  it('buildPlanFactAlerts: расход unplanned_* без события в плане → алерт «внеплановый платёж»', () => {
+    const operations = [
+      { id: 'o1', direction: 'out', amount: 50000, date: new Date('2026-10-20'), plannedness: 'unplanned_capex' },
+      { id: 'o2', direction: 'out', amount: 3000, date: new Date('2026-10-21'), plannedness: 'planned_fixed' }, // не внеплановый — алерта нет
+    ];
+    const alerts = buildPlanFactAlerts({ events: [], forecast: {}, operations, today: asOf });
+    const unplanned = alerts.filter((a) => a.type === 'unplanned_payment');
+    expect(unplanned.length).toBe(1);
+    expect(unplanned[0].amount).toBe(50000);
+    expect(unplanned[0].message).toContain('Внеплановый платёж');
+    expect(unplanned[0].message).toMatch(/50[0-9\s\u00A0]000/);
+  });
+
+  it('расход, совпавший с плановым событием (±3 дня, ±tol) → без алерта', () => {
+    const operations = [{ id: 'o1', direction: 'out', amount: 50000, date: new Date('2026-10-20'), plannedness: 'unplanned_operational' }];
+    const events = [{ id: 'e1', direction: 'out', amount: 50000, expectedDate: '2026-10-21', status: 'pending', active: true }];
+    const alerts = buildPlanFactAlerts({ events, forecast: {}, operations, today: asOf });
+    expect(alerts.some((a) => a.type === 'unplanned_payment')).toBe(false);
+  });
+
+  it('расход в будущем относительно asOf (today) → без алерта', () => {
+    const operations = [{ id: 'o1', direction: 'out', amount: 9000, date: new Date('2026-10-30'), plannedness: 'unplanned_operational' }];
+    const alerts = buildPlanFactAlerts({ events: [], forecast: {}, operations, today: asOf });
+    expect(alerts.some((a) => a.type === 'unplanned_payment')).toBe(false);
+  });
+
+  it('reconcile работает от asOf (business-даты), не от «стены»: статус определяется опорной датой', () => {
+    const ev = { id: 'e1', direction: 'in', amount: 1000, counterpartyInn: '7700000001', expectedDate: '2026-10-10', status: 'pending' };
+    // asOf до окна платежа → pending (даже если «стена» гораздо позже)
+    const pending = reconcile([ev], [], new Date('2026-09-01'), CFG).results[0];
+    expect(pending.status).toBe('pending');
+    // asOf за окном и без платежа → overdue
+    const overdue = reconcile([ev], [], new Date('2026-11-01'), CFG).results[0];
+    expect(overdue.status).toBe('overdue');
+    // платёж в окне [exp−3, exp+grace] → paid, если asOf не раньше начала окна «late»-ветки
+    const paid = reconcile(
+      [ev],
+      [{ id: 'o1', direction: 'in', amount: 1000, counterpartyInn: '7700000001', date: new Date('2026-10-12') }],
+      new Date('2026-10-25'),
+      CFG
+    ).results[0];
+    expect(paid.status).toBe('paid');
+  });
+
+  it('gap_forecast-алерт: gapDate из ядра — ISO-строка, вероятность — gapProbabilityPct (процент)', () => {
+    const alerts = buildPlanFactAlerts({
+      events: [],
+      forecast: { gapDate: '2026-11-05', gapProbabilityPct: 42 },
+      operations: [],
+      today: new Date('2026-09-29T00:00:00Z'),
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].type).toBe('gap_forecast');
+    expect(alerts[0].date).toBe('2026-11-05');
+    expect(alerts[0].message).toContain('42 %');
+  });
 });

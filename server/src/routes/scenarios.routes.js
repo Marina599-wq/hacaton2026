@@ -10,5 +10,6 @@ router.use(authMiddleware);
 
 router.post('/simulate', scenariosController.simulate);
 router.get('/clients', scenariosController.clients);
+router.get('/defaults', scenariosController.defaults); // отчёт §8.4: дефолт unplanned_expense из истории
 
 export default router;

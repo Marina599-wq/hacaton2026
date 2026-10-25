@@ -27,6 +27,18 @@ export class ScenariosController {
       next(err);
     }
   }
+
+  /** GET /scenarios/defaults — дефолт unplanned_expense из истории (медиана unplanned_*). */
+  async defaults(req, res, next) {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) throw ApiError.unauthorized();
+      const result = await scenarioService.suggestUnplannedDefault(userId);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 export const scenariosController = new ScenariosController();

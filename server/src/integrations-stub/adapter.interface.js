@@ -2,7 +2,9 @@
 // каждый провайдер возвращает массив черновиков PlannedEvent (без userId — проставляет контроллер).
 //
 // Контракт:
-//   sync(ctx: { userId, now, operations }) => Array<PlannedEventDraft>
+//   sync(ctx: { asOf: Date }) => Array<PlannedEventDraft>
+// asOf — опорная дата (utils/asOf.js): устаревшая выписка — последняя операция,
+// не настенные часы (ТЗ WP-7 §9). Даты всех мок-событий привязаны к asOf.
 //
 // Ограничения: только детерминированные генераторы (mock), без реальных API и OAuth.
 export class BaseAdapter {

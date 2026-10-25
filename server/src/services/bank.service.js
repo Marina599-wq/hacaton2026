@@ -23,15 +23,18 @@ export class BankService {
    * учитывались в остатке и прогнозе. Повторный синк за один день не дублирует.
    */
   async sync(userId) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const operations = await prisma.operation.findMany({ where: { userId }, orderBy: { date: 'asc' } });
+    // ТЗ WP-7 §9: бизнес-дата синка — опорная дата asOf (устаревшая выписка — последняя операция),
+    // а не настенные часы; new Date() остаётся только как верхняя граница asOf
+    const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
+    const asOfStr = getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
+    const today = new Date(`${asOfStr}T00:00:00Z`);
 
     const already = await prisma.operation.findMany({ where: { userId, source: 'bank_stub', date: today } });
     if (already.length > 0) {
       return { synced: true, new: 0, operations: already };
     }
 
-    const operations = await prisma.operation.findMany({ where: { userId }, orderBy: { date: 'asc' } });
     let balance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
 
     // Детерминированный «банк»: суммы зависят от даты, а не от Math.random().
@@ -104,10 +107,13 @@ export class BankService {
 
     const operations = await prisma.operation.findMany({ where: { userId }, orderBy: { date: 'asc' } });
     const balance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
+    // ТЗ WP-7 §9: дата операции — опорная дата asOf, а не настенные часы
+    const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
+    const asOfStr = getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
     const op = await prisma.operation.create({
       data: {
         userId,
-        date: new Date(),
+        date: new Date(`${asOfStr}T00:00:00Z`),
         amount: sum,
         direction: 'in',
         category: 'income',
@@ -139,8 +145,12 @@ export class BankService {
     ]);
     const balance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
     const minThreshold = user?.minBalance ?? 0;
-    const payDate = date ? new Date(date) : new Date();
-    if (Number.isNaN(payDate.getTime())) payDate.setTime(Date.now());
+    // ТЗ WP-7 §9: дата платежа по умолчанию — опорная дата asOf (не настенные часы);
+    // явная date из запроса приоритетна, некорректная — тоже откат к asOf
+    const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
+    const asOfDate = new Date(`${getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    const payDate = date ? new Date(date) : asOfDate;
+    if (Number.isNaN(payDate.getTime())) payDate.setTime(asOfDate.getTime());
 
     const op = await prisma.operation.create({
       data: {

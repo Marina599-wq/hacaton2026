@@ -22,6 +22,24 @@ function addDaysISO(iso, days) {
   return new Date(ms + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * Дефолт сценария unplanned_expense (отчёт §8.4): «типичный внеплановый расход» =
+ * медиана сумм исторических unplanned_* списаний пользователя (вместо ручного «с нуля»).
+ * Нет таких операций — null (клиент остаётся с нулевым/ручным вводом, текущее поведение).
+ * @param {Array<{ direction: string, amount: number, plannedness?: string|null }>} operations
+ * @returns {number|null} медиана (round2) или null
+ */
+export function unplannedExpenseMedian(operations) {
+  const amounts = (operations || [])
+    .filter((o) => o.direction === 'out' && String(o.plannedness ?? '').startsWith('unplanned_'))
+    .map((o) => Math.abs(Number(o.amount) || 0))
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b);
+  if (amounts.length === 0) return null;
+  const mid = Math.floor(amounts.length / 2);
+  return round2(amounts.length % 2 ? amounts[mid] : (amounts[mid - 1] + amounts[mid]) / 2);
+}
+
 /** Вводные те же, что у GET /dashboard: операции/риски/плановые события/порог/asOf/seed. */
 async function loadInputs(userId) {
   const [operations, risks, user, plannedEvents] = await Promise.all([
@@ -142,6 +160,21 @@ export class ScenarioService {
       delta,
       asOf: ctx.asOf,
       scenarios,
+    };
+  }
+
+  /**
+   * GET /scenarios/defaults — дефолт unplanned_expense из истории (отчёт §8.4):
+   * медиана unplanned_* списаний; нет истории → amount null (текущее поведение — ввод «с нуля»).
+   */
+  async suggestUnplannedDefault(userId) {
+    const operations = await prisma.operation.findMany({
+      where: { userId, direction: 'out' },
+      select: { direction: true, amount: true, plannedness: true }
+    });
+    const amount = unplannedExpenseMedian(operations);
+    return {
+      unplannedExpense: amount == null ? null : { amount, basis: 'history_median' }
     };
   }
 

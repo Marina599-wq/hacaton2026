@@ -3,6 +3,7 @@ import { maskName, maskInn } from '../utils/masking.js';
 import { checkCounterparty, ensureCounterpartyRisk } from '../services/counterpartyCheck.service.js';
 import { calculateUpcomingTaxes } from '../services/taxCalendar.service.js';
 import { planFactService } from '../services/planFact.service.js';
+import { getAsOfDate } from '../utils/asOf.js';
 
 const plannedEventBody = z.object({
   type: z.enum(['contract', 'invoice', 'tax']),
@@ -19,6 +20,7 @@ const plannedEventBody = z.object({
 
 // Детектор просрочки (ТЗ-доп. §4.1 Б): pending-события с expectedDate < today без оплаты в Operation
 // по тому же direction + counterpartyInn + сумма ±1% → status = "overdue".
+// today = опорная дата asOf (ТЗ WP-7 §9): передаётся от вызывающего; по умолчанию — настенные часы.
 export async function markOverdueEvents(db, userId, today = new Date()) {
   const pending = await db.plannedEvent.findMany({ where: { userId, status: 'pending' } });
   const startOfToday = new Date(today); startOfToday.setUTCHours(0, 0, 0, 0);
@@ -128,11 +130,16 @@ export async function updatePlannedEvent(db, userId, id, data) {
 }
 
 // Синхронизация налогового календаря (POST /api/integrations/tax-calendar/sync)
-export async function syncTaxCalendar(db, userId) {
+// asOf (опционально, ГГГГ-ММ-ДД или Date): старт расчёта от опорной даты (ТЗ WP-7 §9);
+// без asOf — опорная дата из выписки пользователя (уровень asOf в getAsOfDate), не настенные часы.
+export async function syncTaxCalendar(db, userId, asOf = null) {
   await db.plannedEvent.deleteMany({ where: { userId, source: 'tax_calendar', status: 'pending' } });
-  const operations = await db.operation.findMany({ where: { userId } });
-  const now = new Date();
-  const drafts = calculateUpcomingTaxes(operations, now, 90);
+  const operations = await db.operation.findMany({ where: { userId }, orderBy: { date: 'asc' } });
+  const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
+  const refDate = asOf
+    ? new Date(asOf)
+    : new Date(`${getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const drafts = calculateUpcomingTaxes(operations, refDate, 90);
   const created = [];
   for (const d of drafts) {
     created.push(await db.plannedEvent.create({ data: { ...d, userId } }));

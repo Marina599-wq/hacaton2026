@@ -39,6 +39,7 @@ import type {
   Subcategory,
   User,
   ForecastPoint,
+  GapBreakdown,
 } from '@/types/api';
 
 function qs(params: Record<string, string | number | undefined> | null | undefined): string {
@@ -141,6 +142,9 @@ export const api = {
       http.get<PlanFactPeriodsResponse>(
         `/plan-fact${qs({ days: String(days), granularity })}`,
       ),
+    /** Разбивка «из чего складывается нехватка» (отчёт §8.4, минимум §8.7). */
+    gapBreakdown: (days?: 30 | 60 | 90) =>
+      http.get<GapBreakdown>(`/plan-fact/gap-breakdown${qs({ days: days ? String(days) : undefined })}`),
   },
   categories: {
     /** Каталог категорий и подкатегорий (ТЗ-доработка §2.1). */
@@ -148,8 +152,15 @@ export const api = {
   },
   operations: {
     // Бэк (ветка Backend) отдаёт «голый» массив, а не Paged — оборачиваем.
-    list: async (q: { month: string; category?: string; page?: number; limit?: number; uncategorized?: boolean }): Promise<Paged<Operation>> => {
-      const d = await http.get<Operation[] | Paged<Operation>>(`/operations${qs({ ...q, uncategorized: q.uncategorized ? 'true' : undefined })}`);
+    // recurring — фильтр «Повторяющиеся платежи» (отчёт §8.2): по классам плановости, в пределах месяца.
+    list: async (q: { month: string; category?: string; page?: number; limit?: number; uncategorized?: boolean; recurring?: boolean }): Promise<Paged<Operation>> => {
+      const d = await http.get<Operation[] | Paged<Operation>>(
+        `/operations${qs({
+          ...q,
+          uncategorized: q.uncategorized ? 'true' : undefined,
+          recurring: q.recurring ? 'true' : undefined,
+        })}`,
+      );
       if (Array.isArray(d)) return { items: d, total: d.length, page: q.page ?? 1, pages: 1 };
       return d;
     },
@@ -170,9 +181,9 @@ export const api = {
     // контрактная форма {month,total,groups} проходит как есть.
     // ТЗ-доработка §10 (WP-3): диаграмма группируется по subcategory;
     // null/пустая subcategory учитывается отдельно как «Не категоризовано».
-    summary: async (q: { month: string; category?: HistoryCategory | string }): Promise<HistorySummary> => {
+    summary: async (q: { month: string; category?: HistoryCategory | string; recurring?: boolean }): Promise<HistorySummary> => {
       const raw = await http.get<HistorySummary | { items?: Operation[] }>(
-        `/history/summary${qs({ month: q.month, category: q.category || undefined })}`,
+        `/history/summary${qs({ month: q.month, category: q.category || undefined, recurring: q.recurring ? 'true' : undefined })}`,
       );
       if (raw && !Array.isArray(raw) && 'groups' in raw) return raw as HistorySummary;
       const ops = (raw as { items?: Operation[] } | undefined)?.items ?? [];

@@ -6,6 +6,7 @@ import { prisma } from '../config/db.js';
 import { ApiError } from '../utils/errors.js';
 import { FORECAST_CONFIG } from '../config/forecast.config.js';
 import { calculateForecast } from './forecast.service.js';
+import { getAsOfDate } from '../utils/asOf.js';
 
 const DAY_MS = 86_400_000;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -14,7 +15,10 @@ const dayOnly = (d) => {
   return new Date(x.getFullYear(), x.getMonth(), x.getDate());
 };
 const daysBetween = (a, b) => Math.round((dayOnly(b).getTime() - dayOnly(a).getTime()) / DAY_MS);
-const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const isoDay = (d) => {
+  const x = dayOnly(d); // принимает и Date, и ISO-строку (gapDate из ядра — строка)
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
 
 // Метка контрагента для сообщений (ТЗ WP-5 п.6: «от Кл***») — первые 2 символа + ***
 export function maskName(name) {
@@ -167,9 +171,36 @@ export function buildPlanFactAlerts({ events = [], forecast = {}, operations = [
       type: 'gap_forecast',
       severity: 'critical',
       title: 'Ожидаемый разрыв кассы',
-      message: `Ожидаемый разрыв остатка ${dayStr(forecast.gapDate)} (вероятность ${Math.round((forecast.gapProbability ?? 0) * 100)} %)`,
+      message: `Ожидаемый разрыв остатка ${dayStr(forecast.gapDate)} (вероятность ${Math.round(forecast.gapProbabilityPct ?? 0)} %)`,
       date: isoDay(forecast.gapDate),
       amount: null
+    });
+  }
+
+  // 4) Внеплановые платежи (отчёт §8.4): расход, классифицированный unplanned_*,
+  //    прошедший к asOf (today) и не совпавший ни с одним плановым событием (±3 дня, сумма ±tol).
+  const tol = (FORECAST_CONFIG.planMatchAmountTolerancePct ?? 1) / 100;
+  let unplannedCount = 0;
+  for (const op of operations) {
+    if (op.direction !== 'out' || !String(op.plannedness ?? '').startsWith('unplanned_')) continue;
+    const t = dayOnly(op.date).getTime();
+    if (t > now) continue; // только прошедшие по asOf
+    const inPlan = events.some((ev) => {
+      if (ev.direction !== 'out') return false;
+      const A = Math.abs(Number(ev.amount) || 0);
+      const T = Math.abs(Number(op.amount) || 0);
+      return Math.abs(dayOnly(ev.expectedDate).getTime() - t) <= 3 * DAY_MS && A > 0 && Math.abs(A - T) <= tol * A;
+    });
+    if (inPlan || unplannedCount >= 5) continue; // не больше 5 алертов, чтобы не захлёстывать
+    unplannedCount += 1;
+    alerts.push({
+      id: `unplanned_payment_${op.id}`,
+      type: 'unplanned_payment',
+      severity: 'warning',
+      title: 'Внеплановый платёж',
+      message: `Внеплановый платёж на сумму ${fmt(op.amount)} ₽ ${dayStr(op.date)} — в плане такого события не было`,
+      date: isoDay(op.date),
+      amount: op.amount
     });
   }
 
@@ -183,9 +214,11 @@ export class PlanFactService {
   /**
    * ТЗ WP-5 п.3: сверка перед чтением плановых событий / после добавления операций.
    * Идемпотентна: значения не меняются — записи в БД нет (повторный вызов ничего не меняет).
+   * @param {Date} [asOf] опорная дата сверки (отчёт 3.2: бизнес-даты — от asOf, не от стены);
+   *   по умолчанию new Date() — контроллер передаёт asOf выписки (контракт buildPlanFactAlerts.today).
    * @returns {number} число событий, чьи статусы изменились
    */
-  async reconcileForUser(userId) {
+  async reconcileForUser(userId, asOf = new Date()) {
     const events = await prisma.plannedEvent.findMany({
       where: { userId, active: true, status: { in: RECONCILABLE } }
     });
@@ -194,7 +227,7 @@ export class PlanFactService {
       where: { userId },
       select: { id: true, direction: true, amount: true, counterpartyInn: true, date: true }
     });
-    const { results } = reconcile(events, operations, new Date(), FORECAST_CONFIG);
+    const { results } = reconcile(events, operations, asOf, FORECAST_CONFIG);
     let changed = 0;
     for (const r of results) {
       const ev = events.find((e) => e.id === r.id);
@@ -223,7 +256,15 @@ export class PlanFactService {
     // 400 VALIDATION (WP-6: типизированный код)
     const d = [30, 60, 90].includes(Number(days)) ? Number(days) : 30;
     const step = granularity === 'week' ? 7 : 1;
-    const today = dayOnly(new Date());
+    // Отчёт 3.2: период рисунка от опорной даты (asOf), не от стены —
+    // последние 90 дней истории заканчиваются asOf выписки, а не «сегодня».
+    const lastOp = await prisma.operation.findFirst({
+      where: { userId },
+      select: { date: true },
+      orderBy: { date: 'desc' }
+    });
+    const asOfIso = getAsOfDate(lastOp?.date ?? null, new Date()) ?? new Date().toISOString().slice(0, 10);
+    const today = dayOnly(new Date(`${asOfIso}T00:00:00Z`));
     const from = new Date(today.getTime() - (d - 1) * DAY_MS);
     const cut = new Date(from.getTime() - DAY_MS);
 
@@ -327,7 +368,17 @@ export class PlanFactService {
 
   // ===== Legacy (GET /dashboard/plan-fact?month=, docs/api-contract.md) =====
   async forMonth(userId, month) {
-    if (!/^\d{4}-\d{2}$/.test(month)) month = new Date().toISOString().slice(0, 7);
+    // Дефолтный месяц — от опорной даты (asOf) выписки, а не от стены (отчёт 3.2);
+    // операций нет — текущий месяц.
+    if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
+      const lastOp = await prisma.operation.findFirst({
+        where: { userId },
+        select: { date: true },
+        orderBy: { date: 'desc' }
+      });
+      const asOfIso = getAsOfDate(lastOp?.date ?? null, new Date()) ?? new Date().toISOString().slice(0, 10);
+      month = asOfIso.slice(0, 7);
+    }
     const [year, m] = month.split('-').map(Number);
     const from = new Date(Date.UTC(year, m - 1, 1));
     const to = new Date(Date.UTC(year, m, 0, 23, 59, 59));
@@ -390,6 +441,90 @@ export class PlanFactService {
     total.deltaOut = round2(total.actualOut - total.plannedOut);
 
     return { month, total, groups };
+  }
+
+  /**
+   * Разбивка «из чего складывается нехватка» рядом с найденным разрывом (отчёт §8.4, минимум §8.7):
+   * обязательные платежи (ближайшие PlannedEvent-списания), внеплановые резервы, ожидаемые поступления.
+   * Обязательные/поступления — активные события со статусом pending/overdue в окне
+   * [asOf − 3 дня, asOf + days]; резерв — сумма исторических unplanned_* списаний за 12 мес. до asOf
+   * (нет истории → медиана всех списаний того же окна как оценка «типичного внепланового»).
+   * @returns {{ days: number, asOf: string, mandatoryOut: number, mandatoryCount: number,
+   *             expectedIn: number, expectedInCount: number,
+   *             unplannedReserve: number|null, unplannedBasis: 'sum_12m'|'median_fallback_12m'|null,
+   *             unplannedCount: number }}
+   */
+  async gapBreakdown(userId, days = 30) {
+    const dd = [30, 60, 90].includes(Number(days)) ? Number(days) : 30;
+    const lastOp = await prisma.operation.findFirst({
+      where: { userId },
+      select: { date: true },
+      orderBy: { date: 'desc' }
+    });
+    const asOfIso = getAsOfDate(lastOp?.date ?? null, new Date()) ?? new Date().toISOString().slice(0, 10);
+    const asOfMs = Date.parse(`${asOfIso}T00:00:00Z`);
+    const horizonEndMs = asOfMs + dd * DAY_MS;
+    const windowFromMs = asOfMs - 365 * DAY_MS;
+
+    const [events, outOps] = await Promise.all([
+      prisma.plannedEvent.findMany({
+        where: {
+          userId,
+          active: true,
+          status: { in: ['pending', 'overdue'] },
+          expectedDate: { gte: new Date(asOfMs - 3 * DAY_MS), lte: new Date(horizonEndMs) }
+        }
+      }),
+      prisma.operation.findMany({
+        where: { userId, direction: 'out', date: { gte: new Date(windowFromMs), lte: new Date(asOfMs) } },
+        select: { amount: true, plannedness: true }
+      })
+    ]);
+
+    let mandatoryOut = 0;
+    let mandatoryCount = 0;
+    let expectedIn = 0;
+    let expectedInCount = 0;
+    for (const ev of events) {
+      const a = Math.abs(Number(ev.amount) || 0);
+      if (!a) continue;
+      if (ev.direction === 'out') {
+        mandatoryOut += a;
+        mandatoryCount += 1;
+      } else {
+        expectedIn += a;
+        expectedInCount += 1;
+      }
+    }
+
+    // Внеплановые резервы: сумма unplanned_* за 12 мес.; нет таких операций — медиана списаний (оценка)
+    const amtOf = (o) => Math.abs(Number(o.amount) || 0);
+    const unplanned = outOps.filter((o) => String(o.plannedness ?? '').startsWith('unplanned_')).map(amtOf).filter((n) => n > 0);
+    let unplannedReserve = null;
+    let unplannedBasis = null;
+    if (unplanned.length > 0) {
+      unplannedReserve = round2(unplanned.reduce((a, b) => a + b, 0));
+      unplannedBasis = 'sum_12m';
+    } else {
+      const sorted = outOps.map(amtOf).filter((n) => n > 0).sort((a, b) => a - b);
+      if (sorted.length >= 3) {
+        const mid = Math.floor(sorted.length / 2);
+        unplannedReserve = round2(sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
+        unplannedBasis = 'median_fallback_12m';
+      }
+    }
+
+    return {
+      days: dd,
+      asOf: asOfIso,
+      mandatoryOut: round2(mandatoryOut),
+      mandatoryCount,
+      expectedIn: round2(expectedIn),
+      expectedInCount,
+      unplannedReserve,
+      unplannedBasis,
+      unplannedCount: unplanned.length
+    };
   }
 
   async getEvents(userId, from, to) {

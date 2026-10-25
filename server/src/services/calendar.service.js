@@ -42,8 +42,9 @@ export class CalendarService {
     const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
     const asOf = getAsOfDate(lastOpDate, new Date());
 
-    const now = new Date();
-    const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // ТЗ WP-7 §9: месяц по умолчанию — месяц опорной даты asOf (без операций — настенные часы)
+    const anchor = asOf ? new Date(`${asOf}T00:00:00Z`) : new Date();
+    const defaultMonth = `${anchor.getUTCFullYear()}-${String(anchor.getUTCMonth() + 1).padStart(2, '0')}`;
     const [year, mon] = (month || defaultMonth).split('-').map(Number);
     if (Number.isNaN(year) || Number.isNaN(mon)) return [];
     const daysInMonth = new Date(year, mon, 0).getDate();

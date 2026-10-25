@@ -27,4 +27,18 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /plan-fact/gap-breakdown?days=30|60|90 — разбивка «из чего складывается нехватка»
+ * (отчёт §8.4, минимум §8.7): обязательные платежи (PlannedEvents) / внеплановые резервы /
+ * ожидаемые поступления. Показывается в Dashboard рядом с найденным разрывом.
+ */
+router.get('/gap-breakdown', async (req, res, next) => {
+  try {
+    const days = parseInt(req.query.days ?? '30', 10);
+    res.json(await planFactService.gapBreakdown(req.user.userId, days));
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

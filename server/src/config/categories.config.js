@@ -124,3 +124,27 @@ export const INN_RULE = {
 
 export const OWN_FUNDS_PATTERN = /перевод\s+(?:собственных|своих)\s+средств|между\s+(?:своими|собственными)\s+(?:счёт|счет|карт)/i;
 
+// ── Плановость (отчёт §8.2–8.3, минимальный вариант §8.7): словари и пороги ──
+// Классы: planned_fixed / planned_scheduled / recurring_variable / unplanned_operational /
+// unplanned_capex / owner_discretionary / non_expense.
+export const PLANNED_FIXED_SUBS = ['tax', 'salary', 'rent', 'loan_payment', 'bank_fee'];
+export const OWNER_DISCRETIONARY_SUBS = ['own_funds_out']; // переводы владельца — управляемый блок, не расход бизнеса
+export const NON_EXPENSE_SUBS = ['own_funds_in', 'loan_in', 'refund_in', 'refund_out']; // исключить из статистики расходов
+// §8.3 шаг 3: словари по тексту назначения (нормализованному)
+export const PLANNEDNESS_CAPEX = /мебел|оборудован|станок|компьютер|ноутбук|автомобил|ремонт\s+помещ/i;
+export const PLANNEDNESS_OPERATIONAL = /ремонт|запчаст|шиномонтаж|штраф|пен[яи]|исполнительн|доначисл/i;
+// §8.3 шаг 2: повторяемость по контрагенту (минимум: ≥4 разных месяца, не чаще ~2 раз/мес.)
+export const PLANNEDNESS_RECURRENCE = { minMonths: 4, maxOpsPerMonth: 2 };
+// §8.3 шаг 4: выброс — больше P95 расходов за историю; окно — последние 12 мес.
+export const PLANNEDNESS_OUTLIERS = { quantile: 0.95, windowMonths: 12 };
+// Доверие классов
+export const PLANNEDNESS_CONFIDENCE = {
+  subcategory: 0.9, // правило по подкатегории (белый список / own/refund/loan)
+  planMatch: 0.9, // совпадение с PlannedEvent
+  dictionary: 0.6, // словарь по тексту назначения
+  recurrence: 0.7, // регулярность по истории
+  size: 0.7, // крупная одноразовая (выброс > P95)
+  fallback: 0.5, // нерегулярный расход без признаков — «внеплановый, операционный»
+};
+
+

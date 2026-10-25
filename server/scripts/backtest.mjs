@@ -287,7 +287,7 @@ function main() {
       monteCarloSimulations: FORECAST_CONFIG.monteCarloSimulations,
       seed: FORECAST_CONFIG.monteCarloSeed,
       constantsNote:
-        'Константы forecast.config.js не менялись при запуске (подбор на тренировочном периоде 2024-10-01…2025-12-31 не проводился — использован дефолтный конфиг).',
+        'Волна C (аудит §2.1): дефолты forecast.config.js переподобраны по абляциям — ownerWithdrawalsEnabled: false, statsWindowMonths: 3 (решение и обоснование — в комментариях конфига и docs/MODEL_COMPARISON.md); подбора на тренировочном периоде не проводилось (датасет организаторов не в репозитории). Вероятность разрыва перекалибрована: изотоническая сетка PAV по бинам калибровки бэктеста (gaps.P25.calibration: 39 точек, 1 факт-разрыв → константа 1/39 ≈ 2,6 %) — см. calibrateGapProbabilityPct в forecast.service.js.',
     },
     runAt: new Date().toISOString(),
     durationSec: 0,
@@ -422,7 +422,7 @@ function runModelComparison(companies) {
       ablations: ABLATION_MODELS.map((m) => m.id),
       taxExperiment: ['tax-cal', 'tax-none'],
       note:
-        'Holt-Winters — дефолтные параметры forecast.config.js (подбор на тренировочном периоде не проводился: датасет организаторов не в репозитории). Константы основной модели не подбирались — дефолтный конфиг.',
+        'Holt-Winters — дефолтные параметры forecast.config.js (подбор на тренировочном периоде не проводился: датасет организаторов не в репозитории). Волна C (аудит §2.1): дефолты переподобраны по абляциям (выводы владельца отключены, окно статистики 3 мес.) — решение и обоснование в forecast.config.js. Вероятности в таблицах — перекалиброванные (изотоническая сетка PAV по бинам калибровки бэктеста, gaps.P25.calibration: 39 точек, 1 факт-разрыв → константа 1/39 ≈ 2,6 %; на P0/P5/P10 факт-разрывов нет, карта дегенеративна). Пересчёт калибровочной карты на датасете организаторов (150 компаний) — план развития.',
     },
     evaluatedCuts: points.length,
     runAt: new Date().toISOString(),
@@ -497,7 +497,7 @@ function renderComparisonMarkdown(cmp) {
   lines.push('');
   lines.push('## Ограничения');
   lines.push(`- ${cmp.params.note}`);
-  lines.push('- Сравнение выполнено на доступных CSV; датасет организаторов (20+ компаний) в репозиторий не коммитится — после подстановки: `npm run backtest -- test-data/statements --models all`.');
+  lines.push('- Сравнение выполнено на 1 компании (C001, доступный пример CSV); датасет организаторов — 150 компаний, 15 видов бизнеса (test-data/README.md) — в репозиторий не коммитится, ожидается: после подстановки `npm run backtest -- test-data/statements --models all`.');
   lines.push('- Абляции однокомпонентные; совместные эффекты компонентов не оцениваются.');
   lines.push('');
   return lines.join('\n');
@@ -548,10 +548,11 @@ function renderMarkdown(result, files) {
       );
     }
     lines.push('');
-    const best = T_LABELS.map((l) => g.gaps[l]).find((x) => x.factGaps > 0);
-    if (best) {
+    const bestLabel = T_LABELS.find((l) => g.gaps[l].factGaps > 0);
+    if (bestLabel) {
+      const best = g.gaps[bestLabel];
       const wins = best.brierModel != null && best.brierConstant != null && best.brierModel < best.brierConstant;
-      lines.push(`Вывод по вероятности: модель ${wins ? 'лучше' : 'НЕ лучше'} константного прогноза (Brier ${fmt(best.brierModel)} против ${fmt(best.brierConstant)} при T=${best.label ?? ''}).`);
+      lines.push(`Вывод по вероятности: модель ${wins ? 'лучше' : 'НЕ лучше'} константного прогноза (Brier ${fmt(best.brierModel)} против ${fmt(best.brierConstant)} при T=${bestLabel}).`);
     }
     const bSkill = g.balance?.skill;
     lines.push(`Вывод по остаткам: skill против наивного = ${fmtSkill(bSkill)} (${bSkill != null && bSkill > 0 ? 'модель точнее наивного прогноза' : bSkill != null ? 'модель не точнее наивного — ограничение, зафиксировано' : 'н/д'}).`);
@@ -565,7 +566,7 @@ function renderMarkdown(result, files) {
   } else lines.push('Нет пар (разрывов не зафиксировано или калибровочных пар недостаточно).');
   lines.push('');
   lines.push('## Ограничения');
-  lines.push('- Датасет организаторов (20+ компаний, 8+ видов бизнеса) в репозиторий не коммитится (test-data/statements/ в .gitignore); запуск выполнен на доступных файлах: ' + result.params.files.join(', ') + '.');
+  lines.push('- Датасет организаторов: 150 компаний, 15 видов бизнеса, 2 года (test-data/README.md) — в репозиторий не коммитится (test-data/statements/ в .gitignore). Запуск выполнен на 1 компании (C001 — пример из датасета); датасет ожидается, полный прогон: `npm run backtest -- test-data/statements`. Файлы запуска: ' + result.params.files.join(', ') + '.');
   lines.push('');
   return lines.join('\n');
 }

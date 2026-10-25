@@ -34,6 +34,10 @@ model Operation {
   subcategory      String?           // ТЗ-доработка WP-3 §2.1: подкатегория (17 слогов, см. src/config/categories.config.js); null — не категоризована
   categoryConfidence Float?          // доверие категоризации 0..1 (rule) или null (manual)
   categorySource   String   @default("rule") // "rule" | "manual" (исходник правила, TZ §2.3)
+  // Отчёт §8.2–8.7 (минимальный вариант): класс плановости, выводится при категоризации
+  plannedness           String?          // "planned_fixed" | "planned_scheduled" | "recurring_variable" | "unplanned_operational" | "unplanned_capex" | "owner_discretionary" | "non_expense"; null — не классифицирована
+  plannednessConfidence Float?           // доверие класса 0..1
+  plannednessSource     String? @default("rule") // "rule" | "recurrence" | "plan_match" | "manual"
   counterpartyName String            // хранится обезличенным
   counterpartyInn  String            // хранится обезличенным
   purpose          String

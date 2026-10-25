@@ -676,6 +676,28 @@ function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], 
   };
 }
 
+/* ------------------------- перекалибровка вероятности разрыва (аудит §2.1) ------------------------- */
+
+// Детерминированная перекалибровка gapProbabilityPct по бинам калибровки из бэктеста
+// (docs/backtest-results.json → gaps.P25.calibration; запуск на C001: 39 точек, 1 факт-разрыв).
+// Пороги P0/P5/P10 в бэктесте дали 0 факт-разрывов → дегенеративная карта «всё 0»;
+// P25 — единственный порог с факт-разрывами, поэтому карта построена на его бинах.
+// Изотоническая сетка (PAV): все бины складываются в константу 1/39 ≈ 0,026 — сырая модель
+// систематически завышала вероятность (бины 25–97 % при факт. частоте 0,00). Без новых
+// зависимостей: фиксированная таблица. Пересчёт карты на датасете организаторов (150 компаний)
+// — план развития (docs/MODEL_COMPARISON.md, «Ограничения»).
+// [верхняя граница бина, п.п.] → [калиброванная вероятность, п.п.]
+const GAP_PROB_CALIBRATION = [[100, 2.6]];
+
+// Кусочно-постоянный просмотр по сетке: rawPct (0..100) → калиброванная вероятность (п.п.)
+function calibrateGapProbabilityPct(rawPct) {
+  if (rawPct <= 0) return 0; // ни один прогон не пробил порог — не выдумываем предупреждение
+  for (const [upperPct, calibratedPct] of GAP_PROB_CALIBRATION) {
+    if (rawPct <= upperPct) return calibratedPct;
+  }
+  return GAP_PROB_CALIBRATION.at(-1)[1];
+}
+
 /* ---------------------------------- API ---------------------------------- */
 
 /**
@@ -869,7 +891,9 @@ export function calculateForecast(
   const probableGapDate = probableIdx >= 0 ? forecastSeries[probableIdx].date : null;
 
   const historyDays = normalized.length ? today - normalized.reduce((m, op) => Math.min(m, op.day), Infinity) + 1 : 0;
-  const dataQuality = assessDataQuality(historyDays, stats, cfg);
+  // Последняя операция ≤ today по всей выписке (не после дедупликации налогов): устарелость — свойство данных, а не фильтров
+  const lastOpDay = normalized.length ? normalized.reduce((m, op) => (op.day <= today ? Math.max(m, op.day) : m), -Infinity) : null;
+  const dataQuality = assessDataQuality(historyDays, stats, cfg, lastOpDay, today);
 
   // ТЗ-доработка WP-7 §11: остаток на опорную дату уже ниже порога T — разрыв считается «сейчас»:
   // gapDate = asOf, gapAmount = T − остаток на начало прогноза.
@@ -886,7 +910,10 @@ export function calculateForecast(
   return {
     gapDate,
     alreadyBelowThreshold,
-    gapProbabilityPct: mcDisabled ? null : Math.round(monteCarlo.probabilityPct * 10) / 10,
+    // Аудит §2.1: headline-вероятность — перекалиброванная (см. calibrateGapProbabilityPct);
+    // подневные серии dangerProbabilityByDay/cumulativeGapProbabilityByDay остаются сырыми —
+    // калибровка оценена для сводной вероятности горизонта (см. MODEL_COMPARISON.md)
+    gapProbabilityPct: mcDisabled ? null : calibrateGapProbabilityPct(monteCarlo.probabilityPct),
     gapAmount: round2(gapAmount),
     gapAmountMedian: mcDisabled ? null : round2(monteCarlo.medianShortfall),
     gapAmountP90: mcDisabled ? null : round2(monteCarlo.p90Shortfall),
@@ -904,19 +931,27 @@ export function calculateForecast(
   };
 }
 
-function assessDataQuality(historyDays, stats, cfg) {
+function assessDataQuality(historyDays, stats, cfg, lastOpDay = null, today = 0) {
   const warnings = [];
   let level = 'high';
   // ТЗ-доработка WP-7 §1/§10: история < 14 дней (включая пустую выписку) — insufficient.
   if (historyDays < 14) {
     level = 'insufficient';
     warnings.push('Данных недостаточно для прогноза (история короче 14 дней)');
-  } else if (historyDays < cfg.minHistoryDaysLow) {
-    level = 'low';
-    warnings.push(`История короче ${cfg.minHistoryDaysLow} дней — прогноз ориентировочный`);
-  } else if (historyDays < cfg.minHistoryDaysMedium) {
-    level = 'medium';
-    warnings.push('История короче 6 месяцев — сезонность и регулярность оцениваются неточно');
+  } else {
+    // Аудит §3.7: выписка устарела — последняя операция далеко до опорной даты (today >> последней операции).
+    // Без предупреждения ядро возвращало бы уровень «high» и вероятность «0» без объяснения, на каких данных прогноз построен.
+    const staleDays = lastOpDay == null ? null : today - lastOpDay;
+    if (staleDays != null && staleDays > cfg.staleHistoryDays) {
+      level = 'stale';
+      warnings.push(`Выписка устарела: последняя операция ${staleDays} дн. до опорной даты (более ${cfg.staleHistoryDays} дн.) — прогноз построен на устаревших данных`);
+    } else if (historyDays < cfg.minHistoryDaysLow) {
+      level = 'low';
+      warnings.push(`История короче ${cfg.minHistoryDaysLow} дней — прогноз ориентировочный`);
+    } else if (historyDays < cfg.minHistoryDaysMedium) {
+      level = 'medium';
+      warnings.push('История короче 6 месяцев — сезонность и регулярность оцениваются неточно');
+    }
   }
   if (stats.ownerWithdrawals) warnings.push('Учтены регулярные выводы средств владельцем (не выше остатка над минимальным уровнем)');
   return { historyDays, level, warnings };

@@ -10,8 +10,9 @@
 ## Запуск (с нуля, ≤ 5 шагов)
 
 1. `git clone` → `npm install` (корень: ставит `concurrently`)
-2. `npm run setup` — зависимости клиента и сервера, `prisma db push`,
-   сид; создаёт `server/.env` с JWT_SECRET, если файла нет
+2. `npm run setup` — зависимости клиента и сервера, `prisma migrate deploy`
+   (создание БД по миграциям из `server/prisma/migrations/`), сид; создаёт
+   `server/.env` с JWT_SECRET, если файла нет
 3. `npm run dev` — сервер http://localhost:5000 и клиент
    http://localhost:5173 одновременно (проброс `/api` → `5000`)
 4. Открыть http://localhost:5173 → войти `demo@cashflow.ru` / `demo1234`
@@ -38,7 +39,7 @@
 
 | Команда | Что делает |
 | --- | --- |
-| `npm run setup` | зависимости + `prisma db push` + seed (+ `.env`) |
+| `npm run setup` | зависимости + `prisma migrate deploy` + seed (+ `.env`) |
 | `npm run dev` | сервер + клиент одновременно (concurrently) |
 | `npm test` | тесты сервера (vitest) |
 | `npm run lint` | lint клиента и сервера |
@@ -92,3 +93,7 @@ docs/            api-contract.md, ARCHITECTURE.md, BACKTEST.md,
    `C001.csv` и выбранные демо-файлы.
 6. Сценарии «что если» не создают и не меняют операции и риски — только
    оверлей на прогнозе; история запусков хранится в `SandboxScenario`.
+7. Проверка контрагента — **демо-правило**: риск определяется последними
+   двумя цифрами ИНН (12/99/66 → high, 44/55/77 → medium, остальные → low),
+   а не реальными реестрами ФНС/Федресурс; видно в ответе `GET /api/counterparty`
+   (поля `riskLevel`, `badgeText`) и в поле `counterpartyRisk` плановых событий.

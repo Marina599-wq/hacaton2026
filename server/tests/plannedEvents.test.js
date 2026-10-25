@@ -87,26 +87,64 @@ describe('tax calendar (ЕНП/УСН)', () => {
     expect(day.getUTCDate()).toBe(28);
   });
 
-  it('демо-минимум: расчёт < 150 000 на 28-е текущей → 180 000', () => {
+  it('демо-минимум удалён (волна C): искусственных 180 000 ₽ нет — только ЕНП и (при режиме) квартальный аванс', () => {
     const now = new Date();
     const drafts = calculateUpcomingTaxes(
       [{ date: new Date(now.getTime() - 60 * 86400000), amount: 10000, direction: 'in', category: 'income', source: 'import' }],
       now, 30,
     );
-    const floor = drafts.find((d) => d.title === 'Единый налоговый платёж (ЕНП) и аванс по УСн');
-    expect(floor).toBeTruthy();
-    expect(floor.amount).toBe(180000);
+    expect(drafts.find((d) => d.title === 'Единый налоговый платёж (ЕНП) и аванс по УСн')).toBeUndefined();
+    expect(drafts.every((d) => d.amount !== 180000)).toBe(true);
+  });
+
+  it('январь исключён из квартальных авансов по УСН (28-го января аванса нет)', () => {
+    const ops = [{ date: new Date('2026-11-15T00:00:00Z'), amount: 1000000, direction: 'in', category: 'income', source: 'import' }];
+    const drafts = calculateUpcomingTaxes(ops, new Date('2027-01-01T00:00:00Z'), 30);
+    expect(drafts.find((d) => d.title.includes('УСН'))).toBeUndefined(); // 28.01.2027 (чт) — аванса по закону нет
+  });
+
+  it('дата на выходном переносится на ближайший рабочий день', () => {
+    // 28.02.2027 — воскресенье → ЕНП проводится в понедельник 01.03.2027
+    const drafts = calculateUpcomingTaxes([], new Date('2027-02-01T00:00:00Z'), 30);
+    const enp = drafts.find((d) => d.title.startsWith('Единый налоговый платёж (ЕНП)'));
+    expect(enp).toBeTruthy();
+    const d = new Date(enp.expectedDate);
+    expect(d.toISOString().slice(0, 10)).toBe('2027-03-01');
+  });
+
+  it('режим usn15: аванс = 15 % от прибыли (поступления − списания) за 90 дней', () => {
+    const ops = [
+      { date: new Date('2026-08-15T00:00:00Z'), amount: 1000000, direction: 'in', category: 'income', source: 'import' },
+      { date: new Date('2026-08-20T00:00:00Z'), amount: 600000, direction: 'out', category: 'suppliers', source: 'import' },
+    ];
+    const drafts = calculateUpcomingTaxes(ops, new Date('2026-10-01T00:00:00Z'), 30, 'usn15');
+    const quarterly = drafts.find((d) => d.title.includes('УСН'));
+    expect(quarterly).toBeTruthy();
+    expect(quarterly.amount).toBe(0.15 * 400000);
+  });
+
+  it('режимы osno/eshn и незнакомый режим — без событий (режим в данных не указан, суммы не выдумываются)', () => {
+    const ops = [{ date: new Date('2026-09-15T00:00:00Z'), amount: 1000000, direction: 'in', category: 'income', source: 'import' }];
+    for (const mode of ['osno', 'eshn', 'unknown_mode']) {
+      expect(calculateUpcomingTaxes(ops, new Date('2026-10-01T00:00:00Z'), 30, mode)).toEqual([]);
+    }
   });
 });
 
 describe('masking', () => {
-  it('name: первые 2 буквы + ***', () => {
-    expect(maskName('ООО Клевер')).toBe('ОО***');
-    expect(maskName('Сбер')).toBe('Сб***');
+  it('name: первые 2 буквы + *** + короткий хэш (уникальность, отчёт 3.3)', () => {
+    // реальные (не обезличенные) имена: префикс + *** + детерминированный хэш
+    expect(maskName('ООО Клевер')).toBe('ОО***t2gg');
+    expect(maskName('Сбер')).toBe('Сб***kcy4');
+    // уже обезличенные (юр. префикс + цифра) — без изменений, уникальность сохраняется
+    expect(maskName('ООО «Элеватор-242»')).toBe('ООО «Элеватор-242»');
+    expect(maskName('ООО «Элеватор-305»')).toBe('ООО «Элеватор-305»');
   });
 
-  it('inn: первые 2 + ****** + последние 2', () => {
-    expect(maskInn('7701234512')).toBe('77******12');
-    expect(maskInn('77******12')).toBe('77******12');
+  it('inn: реальные — первые 2 + *** + хэш + последние 2; обезличенные (00…) — как есть', () => {
+    expect(maskInn('7701234512')).toBe('77***0y9x12');
+    expect(maskInn('77******12')).toBe('77******12'); // уже маскированный — идемпотентность
+    expect(maskInn('0011223344')).toBe('0011223344');
+    expect(maskInn('0011223356')).toBe('0011223356');
   });
 });

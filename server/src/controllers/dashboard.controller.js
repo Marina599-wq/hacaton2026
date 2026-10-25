@@ -6,12 +6,20 @@ import { buildPlanFactAlerts, planFactService } from '../services/planFact.servi
 import { getAsOfDate } from '../utils/asOf.js';
 import { analyzeStatement } from '../utils/dataQuality.js';
 import { env } from '../config/env.js';
+import { ApiError } from '../utils/errors.js';
 import { performance } from 'node:perf_hooks';
 
 export async function getDashboard(req, res, next) {
   try {
     const userId = req.user.userId;
-    const horizon = parseInt(req.query.horizon || '30', 10);
+    // §3.6 (аудит): ?horizon=abc ранее падал в RangeError → 500; теперь — 400 VALIDATION
+    let horizon = 30;
+    if (req.query.horizon !== undefined) {
+      horizon = Number.parseInt(req.query.horizon, 10);
+      if (!Number.isInteger(horizon) || horizon < 1 || horizon > 366) {
+        throw ApiError.badRequest('horizon — целое число от 1 до 366 (дней)');
+      }
+    }
 
     const operations = await prisma.operation.findMany({
       where: { userId },
@@ -64,7 +72,8 @@ export async function getDashboard(req, res, next) {
 
     // Подсчет итогов за 30 дней от опорной даты (WP-7 §9: итоги от asOf, не от сегодня):
     // окно (asOf − 30 дн … asOf]
-    const asOfMs = new Date(`${asOf}T00:00:00Z`).getTime();
+    const asOfDate = new Date(`${asOf}T00:00:00Z`);
+    const asOfMs = asOfDate.getTime();
     const recentOps = operations.filter(
       (op) => op.date.getTime() <= asOfMs + 86_400_000 - 1 && op.date.getTime() >= asOfMs - 30 * 86_400_000,
     );
@@ -88,8 +97,9 @@ export async function getDashboard(req, res, next) {
         balance: currentBalance
       },
       ...forecastResult,
-      // ТЗ-доработка WP-5 п.6: предупреждения (planned_overdue / regular_missing / разрыв — critical)
-      alerts: buildPlanFactAlerts({ events: plannedEvents, forecast: forecastResult, operations, today: new Date() }),
+      // ТЗ-доработка WP-5 п.6: предупреждения (planned_overdue / regular_missing / разрыв — critical).
+      // WP-7 §9: today = опорная дата asOf (имя параметра today — контракт buildPlanFactAlerts)
+      alerts: buildPlanFactAlerts({ events: plannedEvents, forecast: forecastResult, operations, today: asOfDate }),
       // Слитое поле качества (ТЗ-доработка §1, §10): уровень ядра + пропуски/пустые ИНН/овердрафт + опорная дата
       dataQuality: {
         ...forecastResult.dataQuality,

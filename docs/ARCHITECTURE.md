@@ -15,10 +15,10 @@ flowchart LR
   subgraph Server["Сервер (server/, Express, 5000)"]
     routes["routes/*.js (mount в routes/index.js)"]
     middleware["middleware: rate limit, auth (JWT 24h), error handler"]
-    controllers["controllers: auth, user, operations, risks, plannedEvents,<br/>dashboard, planFact, scenario, integrations, counterparty, bank, sandbox, demo, support, calendar, history"]
-    core["расчётное ядро (чистые функции без БД):<br/>forecast.service + forecast.baselines (WP-2) + forecast.state (WP-2),<br/>categorizer (WP-3), planFact.service (WP-5), taxCalendar.service, scenario.service (WP-4)"]
+    controllers["controllers: auth, bank, calendar, dashboard, demo, gap,<br/>integrations, operations, plannedEvents, risks, sandbox, scenarios, support"]
+    core["расчётное ядро (чистые функции без БД):<br/>forecast.service + forecast.baselines (WP-2),<br/>categorizer (WP-3), planFact.service (WP-5), taxCalendar.service, scenario.service (WP-4)"]
     importer["импорт: parser (CSV/XLSX) → dataQuality (gaps/level/warnings) → categorizer → Prisma"]
-    db["Prisma + SQLite: User, Operation, Risk, PlannedEvent, SupportTicket, SandboxScenario, ForecastState (WP-2)"]
+    db["Prisma + SQLite: User, Operation, Risk, PlannedEvent, SupportTicket, SandboxScenario"]
   end
   routes --> middleware --> controllers
   controllers --> core
@@ -27,7 +27,7 @@ flowchart LR
   importer --> db
   controllers --> db
   subgraph Integ["Интеграции (integrations-stub/ — заглушка, детерминированные тестовые данные)"]
-    adapter["AdapterInterface (adapter.interface.js) + реестр:<br/>1С, ЭДО, налоговый календарь, маркетплейс, банк, реестр контрагентов"]
+    adapter["AdapterInterface (adapter.interface.js) + реестр:<br/>1c, edo, tax-calendar, marketplace, bank"]
   end
   adapter -->|события / операции| controllers
 ```
@@ -36,16 +36,16 @@ flowchart LR
 1. **Импорт** — файл → `POST /api/operations/import` → parser → dataQuality → categorizer (subcategory + confidence) → Prisma (транзакция, разбор до записи).
 2. **Прогноз** — операции + плановые события → `calculateForecast` (детерминированный MC-бутстрап, плановые обязательства, налоговый календарь) → `GET /api/dashboard` (график, вероятные разрывы, сценарии) и `GET /api/calendar`.
 3. **План-факт** — фактические операции + план (planned-events) → `planFact.service` → `GET /api/dashboard/plan-fact` (карточка-сводка на Главной + вкладка, отклонения по месяцам).
-4. **Сценарий «что если»** — параметры в `Sandbox.tsx` (создание разрыва, поздний платёж клиента, рост постоянных расходов) → `scenario.service` (оверлей событий на базе квантильных расчётов) → `POST /api/sandbox/simulate` → базовый и сценарный прогноз на одном графике.
+4. **Сценарий «что если»** — 4 сценария в `Sandbox.tsx` (`client_delay`, `revenue_drop`, `unplanned_expense`, `fixed_costs_growth`; описаны в `docs/SCENARIOS.md`) → `scenario.service` (оверлей событий на базе квантильных расчётов) → `POST /api/scenarios/simulate` → базовый и сценарный прогноз на одном графике. Legacy-оверлей фиктивного события — `POST /api/sandbox/simulate`.
 
 ## 2. Клиент (client/src)
 
 | Модуль | Назначение |
 |---|---|
-| `pages/` | Экраны: Dashboard (Главная: прогноз, вероятные разрывы, сценарии + карточка «План-факт»), OperationDetails (изменение категории операции, WP-3), Payments (Оплата), History (История: круговая диаграмма по subcategory, фильтр, список операций), Sandbox (Песочница и сценарии: создание разрыва, поздний платёж клиента, рост постоянных расходов), Calendar, Support, BankStub (Банк-заглушка), Auth (вход/регистрация) |
-| `components/charts/` | `CashflowChart` (история+прогноз, интерактивные сценарии), `CashflowGapsChart` (остаток по дням с критическими зонами), `CategoryPie` (фиксированная цветовая привязка категорий — `CATEGORY_COLORS`, WP-3), `GapWarning` |
-| `components/panels/` | `IntegrationsPanel` (мульти-выбор, персистентный статус «Синхронизировано» в localStorage, unsync), `PlanFactCard` (WP-5) |
-| `lib/` | `cashflow` (утилиты остатка/разрывов), `format` (деньги, даты), `theme` |
+| `pages/` | Экраны: Dashboard (Главная: прогноз, вероятные разрывы, сценарии + карточка «План-факт»), OperationDetails (изменение категории операции, WP-3), Payments (Оплата), History (История: круговая диаграмма по subcategory, фильтр, список операций), Sandbox (Песочница и сценарии: `client_delay`, `revenue_drop`, `unplanned_expense`, `fixed_costs_growth`), Calendar, Support, BankStub (Банк-заглушка), Auth (вход/регистрация) |
+| `components/charts/` | `ForecastChart` (история+прогноз с полосой p10/p90, интерактивные сценарии), `NegativeScenarioChart` (эффект негативного сценария), `ScenarioCompareChart` (сравнение сценариев), `CategoryPie` (фиксированная цветовая привязка категорий — `CATEGORY_COLORS`, WP-3) |
+| `components/` | `IntegrationsPanel` (мульти-выбор, персистентный статус «Синхронизировано» в localStorage, unsync), `PlanFactCard` (WP-5), `PlannedEventsSection`, `PlannedEventModal`, `CounterpartyShield` |
+| `lib/` | `format` (деньги, даты), `cn` (classnames) |
 | `api/index.ts` | Единая fetch-обёртка: JSON-ответы `{data, error:{code,message}}`, Bearer-токен, `http.del` и т. п. |
 
 Правила проекта: без сторонних UI-китов, палитра «In Color Balance» (slate/emerald, rose только для danger), все подписи/сообщения на русском, деньги — `format` без ₽-иконки, время местное.
@@ -63,29 +63,31 @@ flowchart LR
 2. **Регулярные платежи** — группировка по `normalizePurpose` (ключ без месяца, без НДС-хвоста, без номеров), окно 6 месяцев, допуск ±3 дня, медиана последних 3 повторений; сдвиг с выходных на понедельник; без повторения >45 дней — не проецируется.
 3. **Сезонность** — мультипликаторы по дням месяца/недели на потоках.
 4. **Налоговый календарь** (taxCalendar.service) — регулярные налоговые обязательства в будущее.
-5. **Плановые события** (paid/pending PlannedEvent, займы self_loan/bank_loan) — прямые начисления.
-6. **Разрывы** — первый день, где медиана/вероятность(остаток < T) ≥ 50% + «вероятный разрыв» по `probableGapThresholdPct`; пороги T=0 / T=P5 / T=P10 / T=P25 (квантилы расходов).
-7. **Сценарии** — оверлей события из `buildScenarioEvents` поверх базового прогноза (в WP-4 появятся именованные `options.scenarios`).
+5. **Плановые события** (pending/overdue/partial PlannedEvent, займы self_loan/bank_loan — paid не проецируются повторно) — прямые начисления.
+6. **Разрывы** — первый день, где медиана/вероятность(остаток < T) ≥ 50% + «вероятный разрыв» по `probableGapThresholdPct`; пороги T=0 / T=P5 / T=P10 / T=P25 (квантили остатков до cut — как в `docs/BACKTEST.md` и `server/scripts/pick-demo.mjs`).
+7. **Сценарии** — именованные `options.scenarios` (4 типа: `client_delay`, `revenue_drop`, `unplanned_expense`, `fixed_costs_growth`; `scenario.service`, WP-4, `docs/SCENARIOS.md`) — оверлей событий поверх базового прогноза.
 
 Точка расширения для ML (см. `TZ_dorabotka_cashflow_gap.md` §4): замена внутреннего блока «2» внешним предиктором — сигнатура `calculateForecast` и контракт клиента не меняются.
 
 ### Интеграции (stub)
 
-`integrations-stub/` — реестр провайдеров и адаптеры за AdapterInterface (sync, pull); сейчас mock (banks, tax-calendar и др.). Реальные внешние адаптеры подключаются с тем же интерфейсом без изменений контроллера: `POST /api/integrations/:provider/sync`, `DELETE .../sync` (unsync: только pending-события этого источника).
+`integrations-stub/` — реестр провайдеров и адаптеры за AdapterInterface (sync, pull): `1c`, `edo`, `tax-calendar`, `marketplace`, `bank` (bank-адаптер — по контракту, добавляется параллельно). Сейчас mock (детерминированные события, даты привязаны к asOf). Реальные внешние адаптеры подключаются с тем же интерфейсом без изменений контроллера: `POST /api/integrations/:provider/sync`, `DELETE .../sync` (unsync: только pending-события этого источника).
 
 ## 4. API (кратко)
 
 | Ресурс | Методы | Замечание |
 |---|---|---|
 | `/auth` | register, login, me; PATCH /auth/user | JWT 24h, 401 INVALID_CREDENTIALS (WP-6) |
-| `/user` | GET, PATCH | настройки (minBalance, loanRatePct, currency) |
+| `/user` | PATCH | настройки (`minBalance` — порог разрыва T, ₽, ≥ 0; `companyName`, `inn`) |
 | `/operations` | GET, POST, PATCH, DELETE, POST /import (WP-7) | импорт: разбор до записи, транзакция, dataQuality; маскирование контрагентов в ответах (WP-6) |
 | `/risks`, `/planned-events`, `/support`, `/gap/self-loans` | CRUD | владение {id, userId} → чужой = 404 (WP-6) |
-| `/dashboard` | GET, GET /plan-fact (WP-5) | порядок: сверка (WP-5) → события → прогноз; план-факт отклонения по месяцам |
-| `/integrations` | POST/DELETE :provider/sync, GET /counterparty | провайдеры: 1C, ЭДО, налоговый календарь, маркетплейс, банк, реестр контрагентов (заглушки, WP-6) |
+| `/dashboard` | GET, GET /plan-fact (legacy, WP-5) | порядок: сверка (WP-5) → события → прогноз; `alerts` (просроченные планы / разрыв); legacy GET /plan-fact?month=YYYY-MM — план-факт месяца |
+| `/plan-fact` | GET, GET /gap-breakdown (WP-5) | план-факт по периодам (день/неделя) + разбивка нехватки (обязательные / внеплановые резервы / ожидаемые поступления) |
+| `/scenarios` | POST /simulate, GET /clients, GET /defaults (WP-4) | 4 сценария «что если» (`client_delay`, `revenue_drop`, `unplanned_expense`, `fixed_costs_growth`); `defaults` — дефолт unplanned_expense из истории |
+| `/sandbox` | POST /simulate, POST /reset | legacy: оверлей фиктивного события + сброс сохранённых карточек сценариев; именованные сценарии — `/scenarios` |
+| `/integrations` | POST/DELETE :provider/sync, GET /counterparty | провайдеры: `1c`, `edo`, `tax-calendar`, `marketplace`, `bank` (заглушки, WP-6; bank — по контракту, в работе); GET /counterparty — отчёт по проверкам контрагентов |
 | `/counterparty` | GET | проверка контрагента по name/inn (WP-6) |
-| `/sandbox` | POST /simulate (WP-4), POST /reset | 4 сценария «что если»: разрыв, поздний платёж, рост постоянных расходов |
-| `/calendar`, `/history`, `/bank`, `/demo`, `/categories` | GET/POST | WP-5/WP-7: события календаря, срез истории, банк-заглушка, демо-выписки, таксономия (WP-3) |
+| `/calendar`, `/history`, `/bank`, `/demo`, `/categories` | GET/POST | WP-5/WP-7: события календаря, срез истории (`/history/summary`), банк-заглушка, демо-выписки, таксономия (WP-3) |
 
 Ошибки: `4xx { error: { code, message } }`, коды: VALIDATION, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, RATE_LIMITED, INTERNAL (WP-6), лимитеры: 10/мин auth, 300/мин /api.
 
@@ -93,8 +95,9 @@ flowchart LR
 
 Импорт выписки: CSV (разделитель `;`/`,` авто, BOM, кавычки, пустая строка «без движения» — НЕ пропуск) или XLSX (заголовок в первой непустой строке, поиск по алфавиту/числу/датe) → `dataQuality.js`: gaps/level/warnings (пропуски 3–7 дней — moderate, ≥8 — high) + `asOf.js`: граница 3–4 дня (полный день ≤ N-4 → asOf = день загрузки; иначе N-3). Пропущенные дни исключаются из статистики и bootstrap-пула. Ответы импорта и операций несут `dataQuality` и `import` (loaded/missing/warnings).
 
-Демо-данные: `test-data/demo/` (3 выписки разных видов бизнеса; выбор — `server/scripts/pick-demo.mjs`,
+Демо-данные: `test-data/demo/` (сейчас 1 демо-выписка `statement-demo-C001.csv`; механика выбора `server/scripts/pick-demo.mjs` готова под датасет организаторов — 150 компаний / 15 видов: после подстановки в `test-data/statements/` добавятся 2–3 компании с реальным разрывом;
 загрузка в учётку — `POST /api/demo`, WP-7; ТЗ-доработка п.13), кнопка «Использовать демо-данные» в пустом состоянии.
+Seed задаёт демо-учётке порог разрыва T = P25-квантиль остатков выписки и плановые события (договор, счёт, налог, просроченный платёж) — на C001/asOf=2026-09-29 на главной виден будущий разрыв (docs/BACKTEST.md: на C001 разрыв случился при пороге P25).
 
 ## 6. Развёртывание
 
@@ -104,5 +107,14 @@ flowchart LR
 
 ## 7. Контракт и проверки
 
-- Источники правды: `docs/api-contract.md` (контракт API), `docs/internal/TZ_cashflow_gap_app.md` (основное ТЗ), `TZ_dorabotka_cashflow_gap.md` (доработка, WP-1..WP-9), `docs/internal/TZ_addendum.md` (добавление к ТЗ).
+- Источники правды: `docs/api-contract.md` (контракт API), `docs/internal/TZ_cashflow_gap_app.md` (основное ТЗ), `docs/internal/TZ_dorabotka_cashflow_gap.md` (доработка, WP-1..WP-9), `docs/internal/TZ_addendum.md` (добавление к ТЗ).
 - Машинная сверка клиент↔сервер: `check-contract.mjs` + `contract.test.js` (WP-9), тесты сервера `server/tests/` (в т.ч. security.test, logger.test, scenarios.test, planFact.test, backtest.metrics.test — по мере закрытия WP).
+
+## 8. Планы развития (не реализовано)
+
+- **Обновление прогноза без полного пересчёта** (инкрементальное, ТЗ-доработка WP-2): кэшируемое состояние
+  `ForecastState` (статистика последних N дней / блоки bootstrap, пересчёт только «хвоста») и
+  `meta.computed = "incremental"` в ответе `/dashboard`. Сейчас не реализовано — ответ всегда
+  `meta.computed = "full"` (полный расчёт быстрый: бэктест из 39 точек × 3 горизонтов ≈ 11 с);
+  в Prisma-схеме моделей 6 (User, Operation, Risk, SupportTicket, PlannedEvent, SandboxScenario),
+  `ForecastState` не введён.

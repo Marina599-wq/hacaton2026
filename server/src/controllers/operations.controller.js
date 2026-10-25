@@ -8,6 +8,13 @@ import { ApiError } from '../utils/errors.js';
 import { planFactService } from '../services/planFact.service.js';
 
 /**
+ * Фильтр «Повторяющиеся платежи» (отчёт §8.2): фиксированные плановые (налог/зарплата/
+ * аренда/кредит/комиссии), повторяющиеся контрагенты и плановые события.
+ * Ручные операции plannedness=null — в фильтр не попадают (классифицирует только импорт).
+ */
+export const RECURRING_PLANNEDNESS = ['planned_fixed', 'planned_scheduled', 'recurring_variable'];
+
+/**
  * Обезличивание в ответах (WP-6 §10): контрагенты идут через maskName/maskInn.
  */
 function maskOperation(op) {
@@ -41,12 +48,14 @@ export function categoryWhere(category) {
 export async function getOperations(req, res, next) {
   try {
     const userId = req.user.userId;
-    const { month, category, page = 1, limit = 20, uncategorized } = req.query;
+    const { month, category, page = 1, limit = 20, uncategorized, recurring } = req.query;
 
     const where = { userId };
     if (category) Object.assign(where, categoryWhere(category));
     // ТЗ-доработка WP-3: фильтр «Не категоризовано» (subcategory IS NULL)
     if (String(uncategorized) === 'true') where.subcategory = null;
+    // Фильтр «Повторяющиеся платежи» (отчёт §8.2): по классам плановости из импорта
+    if (String(recurring) === 'true') where.plannedness = { in: RECURRING_PLANNEDNESS };
     if (month) {
       const [year, m] = month.split('-');
       const startDate = new Date(year, parseInt(m, 10) - 1, 1);

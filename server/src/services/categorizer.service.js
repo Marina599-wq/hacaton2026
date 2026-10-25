@@ -24,7 +24,16 @@ import {
   legacyForSub,
   INN_RULE,
   OWN_FUNDS_PATTERN,
+  PLANNED_FIXED_SUBS,
+  OWNER_DISCRETIONARY_SUBS,
+  NON_EXPENSE_SUBS,
+  PLANNEDNESS_CAPEX,
+  PLANNEDNESS_OPERATIONAL,
+  PLANNEDNESS_RECURRENCE,
+  PLANNEDNESS_OUTLIERS,
+  PLANNEDNESS_CONFIDENCE,
 } from '../config/categories.config.js';
+import { FORECAST_CONFIG } from '../config/forecast.config.js';
 import { normalizeForRules } from '../utils/text.js';
 
 const REFUND_WINDOW_MS = 24 * 3_600_000; // §4 п.2.2: 24 часа
@@ -139,20 +148,155 @@ export function buildInnHints(operations) {
 }
 
 /**
+ * Статистики плановости по выписке (отчёт §8.3, минимум): P95 списаний и набор
+ * «регулярных» контрагентов (≥ minMonths разных месяцев, не чаще maxOpsPerMonth раз/мес.).
+ * P95 считается по исходящим операциям (без own_funds/refund — они не расходы бизнеса).
+ * @param {Array} operations операции со date/amount/direction/counterpartyInn/subcategory
+ * @param {object|null} [excludeOp] текущая операция — исключается из статистик
+ *   («выброс больше P95» нельзя считать по выборке, включающей сам выброс)
+ * @returns {{ p95: number|null, recurringInns: Set<string> }}
+ */
+export function plannednessStats(operations, excludeOp = null) {
+  const excludeKey = excludeOp ? plannednessKey(excludeOp) : null;
+  const amounts = [];
+  const byInn = new Map();
+  for (const o of operations || []) {
+    if (o.direction !== 'out') continue;
+    const amt = Math.abs(Number(o.amount) || 0);
+    if (!amt) continue;
+    if (excludeKey != null && plannednessKey(o) === excludeKey) continue; // текущая операция
+    if (o.subcategory && ['own_funds_out', 'refund_out'].includes(o.subcategory)) {
+      byInnTrack(o, byInn);
+      continue; // не тратим в P95, но повторяемость считаем
+    }
+    amounts.push(amt);
+    byInnTrack(o, byInn);
+  }
+  amounts.sort((a, b) => a - b);
+  const q = PLANNEDNESS_OUTLIERS.quantile;
+  const p95 = amounts.length ? amounts[Math.min(amounts.length - 1, Math.floor(q * amounts.length))] : null;
+  const recurringInns = new Set(
+    [...byInn.entries()]
+      .filter(([, e]) => e.months.size >= PLANNEDNESS_RECURRENCE.minMonths && e.count <= PLANNEDNESS_RECURRENCE.maxOpsPerMonth * e.months.size)
+      .map(([inn]) => inn),
+  );
+  return { p95, recurringInns };
+}
+
+/** Позиция операции в выписке (для исключения текущей при расчёте её статистик). */
+function plannednessKey(o) {
+  return [o.direction, Math.abs(Number(o.amount) || 0), String(o.date ?? ''), String(o.counterpartyInn ?? ''), String(o.externalId ?? '')].join('|');
+}
+
+function byInnTrack(o, byInn) {
+  const inn = String(o.counterpartyInn ?? '').trim();
+  if (!inn || inn === '0000000000') return; // без ИНН / «своё» — повторяемость не считаем
+  const key = new Date(o.date);
+  const e = byInn.get(inn) ?? { count: 0, months: new Set() };
+  e.count += 1;
+  e.months.add(`${key.getFullYear()}-${key.getMonth()}`);
+  byInn.set(inn, e);
+}
+
+/**
+ * Класс плановости операции (отчёт §8.2, эвристика минимального варианта §8.7:
+ * подкатегории + словари + owner-класс + P95-правило; без ML).
+ * Вызывается ПОСЛЕ категоризации: op.subcategory уже задан.
+ * @param {object} op { direction, amount, date, purpose?, counterpartyInn?, subcategory }
+ * @param {object} [ctx] { operations?, stats?, plannedEvents?, planGraceDays?, planMatchAmountTolerancePct? }
+ *   operations        — история для повторного расчёта статистик (если stats не переданы);
+ *   stats             — результат plannednessStats(operations);
+ *   plannedEvents     — события плана для planned_scheduled (окно/допуск из FORECAST_CONFIG или ctx);
+ * @returns {{ plannedness: string|null, confidence: number|null, source: string|null }}
+ */
+export function classifyPlannedness(op, ctx = {}) {
+  const none = { plannedness: null, confidence: null, source: null };
+  const sub = op.subcategory;
+
+  // Шаг 1: подкатегория (белый список → planned_fixed; own/refund/loan → owner_discretionary / non_expense)
+  if (sub && PLANNED_FIXED_SUBS.includes(sub)) {
+    return { plannedness: 'planned_fixed', confidence: PLANNEDNESS_CONFIDENCE.subcategory, source: 'rule' };
+  }
+  if (sub && OWNER_DISCRETIONARY_SUBS.includes(sub)) {
+    return { plannedness: 'owner_discretionary', confidence: PLANNEDNESS_CONFIDENCE.subcategory, source: 'rule' };
+  }
+  if (sub && NON_EXPENSE_SUBS.includes(sub)) {
+    return { plannedness: 'non_expense', confidence: PLANNEDNESS_CONFIDENCE.subcategory, source: 'rule' };
+  }
+
+  const norm = normalizeForRules(op.purpose);
+  // Шаг 3: словари по тексту назначения (capex раньше operational: «ремонт помещения» — capex)
+  if (PLANNEDNESS_CAPEX.test(norm)) {
+    return { plannedness: 'unplanned_capex', confidence: PLANNEDNESS_CONFIDENCE.dictionary, source: 'rule' };
+  }
+  if (PLANNEDNESS_OPERATIONAL.test(norm)) {
+    return { plannedness: 'unplanned_operational', confidence: PLANNEDNESS_CONFIDENCE.dictionary, source: 'rule' };
+  }
+
+  const inn = String(op.counterpartyInn ?? '').trim();
+  // Статистики — по истории БЕЗ текущей операции («выброс больше P95» не включает сам себя)
+  const stats = ctx.operations ? plannednessStats(ctx.operations, op) : ctx.stats ?? plannednessStats([]);
+  const isRecurring = Boolean(inn && inn !== '0000000000' && stats.recurringInns.has(inn));
+
+  // Шаг 5: совпадение с планом (только если события плана переданы и это расход)
+  if (op.direction === 'out' && Array.isArray(ctx.plannedEvents) && ctx.plannedEvents.length) {
+    const grace = ctx.planGraceDays ?? FORECAST_CONFIG.planGraceDays ?? 3;
+    const tol = (ctx.planMatchAmountTolerancePct ?? FORECAST_CONFIG.planMatchAmountTolerancePct ?? 1) / 100;
+    const t = new Date(op.date).getTime();
+    const amt = Math.abs(Number(op.amount) || 0);
+    for (const ev of ctx.plannedEvents) {
+      if (ev.direction !== 'out' || ev.active === false) continue;
+      const exp = new Date(ev.expectedDate).getTime();
+      const A = Math.abs(Number(ev.amount) || 0);
+      if (Math.abs(exp - t) <= grace * 86_400_000 && A > 0 && Math.abs(A - amt) <= tol * A) {
+        return { plannedness: 'planned_scheduled', confidence: PLANNEDNESS_CONFIDENCE.planMatch, source: 'plan_match' };
+      }
+    }
+  }
+
+  // Шаг 2: повторяемость — контрагент ≥4 месяцев из истории, не чаще ~2 раз/мес.
+  if (isRecurring) {
+    return { plannedness: 'recurring_variable', confidence: PLANNEDNESS_CONFIDENCE.recurrence, source: 'recurrence' };
+  }
+
+  if (op.direction === 'out') {
+    // Шаг 4: крупная одноразовая (больше P95 расходов, без повторов) → unplanned_capex
+    if (stats.p95 != null && Math.abs(Number(op.amount) || 0) > stats.p95) {
+      return { plannedness: 'unplanned_capex', confidence: PLANNEDNESS_CONFIDENCE.size, source: 'rule' };
+    }
+    // Минимум §8.7: нерегулярный расход без признаков плана — внеплановый (операционный:
+    // разовые счета поставщикам, канцтовары — «внеплановая» ≠ «плохая», §8.2)
+    if (sub && ['suppliers', 'other_out', UNKNOWN_SUB].includes(sub)) {
+      return { plannedness: 'unplanned_operational', confidence: PLANNEDNESS_CONFIDENCE.fallback, source: 'rule' };
+    }
+  }
+  return none;
+}
+
+/**
  * Категоризация всей выписки (для импорта): два прохода —
  * 1) правила (текст/ИНН владельца/24-ч окно), 2) ИНН-hints для нераспознанных (§4 п.5).
- * Возвращает операции с полями схемы: subcategory/category/categoryConfidence/categorySource.
+ * Возвращает операции с полями схемы: subcategory/category/categoryConfidence/categorySource
+ * + класс плановости (отчёт §8): plannedness/plannednessConfidence/plannednessSource.
  * @param {Array} operations — операции parseBankStatement()
  * @param {string} [userInn]
  */
 export function categorizeStatement(operations, userInn) {
   const pass1 = operations.map((op) => ({ ...op, __cat: categorize(op, { userInn, operations: operations }) }));
   const hints = buildInnHints(pass1);
+  // Статистики плановости — один раз по всей выписке (пер-операция plannednessStats был O(n²):
+  // импорт 10k строк с 1,5 с до 87 с).
+  // shortcut: stats без исключения текущей операции; при n в десятках граница повторяемости/P95
+  // может сместиться на 1 операцию — upgrade: пер-операция exclude, если на малых выписках
+  // порог классификации начнёт флипаться.
+  const stats = plannednessStats(operations);
   return pass1.map((o) => {
     const hint = o.counterpartyInn ? hints.get(String(o.counterpartyInn)) : null;
     const cat =
       o.__cat.rule === 'unlabeled' && hint ? categorize(o, { userInn, operations: operations, innHint: hint }) : o.__cat;
     const { __cat, ...rest } = o;
+    // Плановость считается после категоризации: по истории выписки
+    const planned = classifyPlannedness({ ...rest, subcategory: cat.subcategory }, { stats });
     return {
       ...rest,
       subcategory: cat.subcategory,
@@ -160,6 +304,9 @@ export function categorizeStatement(operations, userInn) {
       categoryConfidence: cat.confidence,
       categorySource: 'rule',
       categorizeRule: cat.rule,
+      plannedness: planned.plannedness,
+      plannednessConfidence: planned.confidence,
+      plannednessSource: planned.source,
     };
   });
 }
