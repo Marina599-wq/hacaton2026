@@ -84,7 +84,12 @@ test('риск: включённый ухудшает, выключенный н
   const repay = { ...op('2026-10-25', 330_000, 'out', 'Возврат займа', { source: 'bank_loan' }) };
   const withLoan = calculateForecast([...ops, loan], [], 500_000, 30, T, { today: TODAY });
   const withRepay = calculateForecast([...ops, loan, repay], [], 500_000, 30, T, { today: TODAY });
-  assert.ok(withLoan.gapAmount < base.gapAmount);
+  // ТЗ-доработка WP-7 §11: currentBalance 500k < T 600k → alreadyBelowThreshold,
+  // gapAmount закреплён за «сейчас» = T − currentBalance: займ не уменьшает его,
+  // но поднимает траекторию прогноза (минимум остатка выше).
+  assert.ok(withLoan.alreadyBelowThreshold === true);
+  assert.ok(withLoan.gapAmount === base.gapAmount);
+  assert.ok(withLoan.minForecastBalance > base.minForecastBalance);
   assert.ok(withRepay.minForecastBalance < withLoan.minForecastBalance);
 });
 

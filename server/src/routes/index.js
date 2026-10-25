@@ -14,6 +14,7 @@ import plannedEventsRoutes from './plannedEvents.routes.js';
 import integrationsRoutes from './integrations.routes.js';
 import counterpartyRoutes from './counterparty.routes.js';
 import categoriesRoutes from './categories.routes.js';
+import demoRoutes from './demo.routes.js';
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.use('/auth', authRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/operations', operationsRoutes);
 router.use('/categories', categoriesRoutes);
+router.use('/demo', demoRoutes);
 router.use('/risks', risksRoutes);
 router.use('/gap', gapRoutes);
 router.use('/calendar', calendarRoutes);

@@ -132,6 +132,7 @@ function normalizeOperations(operations, cfg) {
     if (day === null || !Number.isFinite(amount) || amount === 0) continue;
     if (op.direction !== 'in' && op.direction !== 'out') continue;
     const { y, m, d } = civil(day);
+    const sub = op.subcategory ?? null;
     result.push({
       day,
       dom: d,
@@ -144,13 +145,14 @@ function normalizeOperations(operations, cfg) {
       source: op.source ?? '',
       bal: Number(op.balanceEndOfDay ?? op.bal),
       isFinancing: FINANCING_SOURCES.has(op.source),
-      // разовые нерабочие поступления/списания (заём учредителя, уставный капитал, исполнительный лист, обеспечительный платёж) не должны попадать в статистику
-      isNonOp: Boolean(cfg.nonOperatingPattern && cfg.nonOperatingPattern.test(op.purpose ?? '')),
-      // переводы между своими счетами — не доход и не расход, но выводы владельцем моделируются отдельно (см. ownerWithdrawals)
-      isTransfer: Boolean(cfg.excludeInternalTransfers && cfg.internalTransferPattern.test(op.purpose ?? '')),
+      // ТЗ-доработка WP-3 §12 p.9: subcategory имеет приоритет, regex — только fallback (subcategory=null)
+      // разовые нерабочие поступления (loan_in) — не регулярный доход
+      isNonOp: sub ? sub === 'loan_in' : Boolean(cfg.nonOperatingPattern && cfg.nonOperatingPattern.test(op.purpose ?? '')),
+      // переводы между своими счетами (own_funds_*) — не доход и не расход, но выводы владельцем моделируются отдельно
+      isTransfer: Boolean(cfg.excludeInternalTransfers && (sub ? sub === 'own_funds_in' || sub === 'own_funds_out' : cfg.internalTransferPattern.test(op.purpose ?? ''))),
       // возвраты ошибочных платежей (ТЗ-доработка WP-7 §12): не попадают в регулярную и нерегулярную статистику
-      subcategory: op.subcategory ?? null,
-      isRefund: op.subcategory === 'refund_in' || op.subcategory === 'refund_out',
+      subcategory: sub,
+      isRefund: sub === 'refund_in' || sub === 'refund_out',
     });
   }
   return result;
@@ -736,9 +738,9 @@ export function calculateForecast(
       riskLoss: round2(riskLoss),
       ownerWithdrawal: round2(ownerWithdrawal),
       delta: round2(delta),
-      balanceLow: round2(monteCarloBand.low[i]),
-      balanceMedian: round2(monteCarloBand.mid[i]),
-      balanceHigh: round2(monteCarloBand.high[i]),
+      balanceLow: monteCarloBand ? round2(monteCarloBand.low[i]) : null,
+      balanceMedian: monteCarloBand ? round2(monteCarloBand.mid[i]) : null,
+      balanceHigh: monteCarloBand ? round2(monteCarloBand.high[i]) : null,
       isDanger,
       reasons
     });
@@ -763,11 +765,21 @@ export function calculateForecast(
   const historyDays = normalized.length ? today - normalized.reduce((m, op) => Math.min(m, op.day), Infinity) + 1 : 0;
   const dataQuality = assessDataQuality(historyDays, stats, cfg);
 
+  // ТЗ-доработка WP-7 §11: остаток на опорную дату уже ниже порога T — разрыв считается «сейчас»:
+  // gapDate = asOf, gapAmount = T − остаток на начало прогноза.
+  const alreadyBelowThreshold = currentBalance < threshold;
+  if (alreadyBelowThreshold) {
+    gapDate = toIso(today);
+  }
+
   // gapAmount — сколько внести в день разрыва, чтобы закрыть разрыв на базовом прогнозе; медиана по прогонам — gapAmountMedian.
-  const gapAmount = gapDate ? Math.max(0, threshold - minBalance) : 0;
+  const gapAmount = alreadyBelowThreshold
+    ? Math.max(0, threshold - currentBalance)
+    : gapDate ? Math.max(0, threshold - minBalance) : 0;
 
   return {
     gapDate,
+    alreadyBelowThreshold,
     gapProbabilityPct: mcDisabled ? null : Math.round(monteCarlo.probabilityPct * 10) / 10,
     gapAmount: round2(gapAmount),
     gapAmountMedian: mcDisabled ? null : round2(monteCarlo.medianShortfall),
@@ -789,7 +801,11 @@ export function calculateForecast(
 function assessDataQuality(historyDays, stats, cfg) {
   const warnings = [];
   let level = 'high';
-  if (historyDays < cfg.minHistoryDaysLow) {
+  // ТЗ-доработка WP-7 §1/§10: история < 14 дней (включая пустую выписку) — insufficient.
+  if (historyDays < 14) {
+    level = 'insufficient';
+    warnings.push('Данных недостаточно для прогноза (история короче 14 дней)');
+  } else if (historyDays < cfg.minHistoryDaysLow) {
     level = 'low';
     warnings.push(`История короче ${cfg.minHistoryDaysLow} дней — прогноз ориентировочный`);
   } else if (historyDays < cfg.minHistoryDaysMedium) {

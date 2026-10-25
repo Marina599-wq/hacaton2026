@@ -5,10 +5,8 @@ import { prisma } from '../config/db.js';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
-import { generateDemoTransactions } from '../../prisma/seed/demo-data.js';
 import { parseBankStatement, buildImportSummary } from '../utils/parser.js';
-import { categorizeStatement } from '../services/categorizer.service.js';
-import { getAsOfDate } from '../utils/asOf.js';
+import { readDemoOperations } from './demo.controller.js';
 import { anonymizeCounterparty } from '../utils/anonymizer.js';
 
 /**
@@ -28,9 +26,10 @@ export async function register(req, res, next) {
 
     // 1) Разбор файла — до создания пользователя (422 → user не появляется).
     let parsed = null;
-    let demoTx = null;
+    let demoOps = null;
     if (useDemoData === 'true' || useDemoData === true) {
-      demoTx = generateDemoTransactions();
+      // ТЗ-доработка WP-7 §13: демо-данные — выписки из test-data/demo/, а не генератор.
+      demoOps = await readDemoOperations(null, inn || null);
     } else if (req.file) {
       parsed = await parseBankStatement(req.file.buffer, req.file.originalname, inn || null);
       if (parsed.operations.length === 0 && parsed.meta.format !== 'empty') {
@@ -39,24 +38,17 @@ export async function register(req, res, next) {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const token = jwt.sign(
-      { email },
-      env.JWT_SECRET,
-      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN },
-    );
-
-    // 2) user + operations — одна транзакция (частичное состояние недопустимо).
     const user = await prisma.$transaction(async (tx) => {
       const u = await tx.user.create({
         data: { email, passwordHash, companyName, inn, minBalance },
       });
 
-      if (demoTx) {
-        // Демо-генератор: опережающая категоризация (WP-3), без userInn (у демки ИНН из формы).
-        const ops = categorizeStatement(
-          demoTx.transactions.map((t) => ({ ...t, source: 'demo' })),
-          inn || null,
-        ).map((t) => ({ ...t, userId: u.id }));
+      if (demoOps) {
+        // Категоризация уже выполнена в парсере (WP-3); служебные поля не в схеме Prisma.
+        const ops = demoOps.operations.map((op) => {
+          const { companyId, categorizeRule, ...rest } = op;
+          return { ...rest, userId: u.id, source: 'demo' };
+        });
         for (let i = 0; i < ops.length; i += 500) {
           await tx.operation.createMany({ data: ops.slice(i, i + 500) });
         }
@@ -84,6 +76,12 @@ export async function register(req, res, next) {
       return u;
     });
 
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      env.JWT_SECRET,
+      { algorithm: 'HS256', expiresIn: env.JWT_EXPIRES_IN },
+    );
+
     // ТЗ-доработка WP-7 §5: итог импорта — строки, импортировано, пропущено, дубли, предупреждения.
     let importSummary = null;
     if (parsed) {
@@ -95,6 +93,16 @@ export async function register(req, res, next) {
         rowErrors: parsed.rowErrors,
       });
       logger.info('import', { lines: parsed.operations.length, skipped: parsed.meta.rowsSkipped, warnings: parsed.warnings.length });
+    } else if (demoOps) {
+      // ТЗ-доработка WP-7 §5: итог импорта и по демо-выписке (строки, пропущено, предупреждения).
+      importSummary = buildImportSummary({
+        rowsTotal: demoOps.meta.rowsTotal,
+        operations: demoOps.operations,
+        duplicatesRemoved: demoOps.meta.duplicatesRemoved,
+        possibleDuplicates: demoOps.meta.possibleDuplicates,
+        rowErrors: demoOps.rowErrors,
+      });
+      logger.info('import', { lines: demoOps.operations.length, skipped: demoOps.meta.rowsSkipped, warnings: demoOps.warnings?.length ?? 0 });
     }
 
     res.status(201).json({

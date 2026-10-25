@@ -36,7 +36,7 @@ function detectDelimiter(headerLine) {
     if (ch === '"') inQuotes = !inQuotes;
     else if (!inQuotes && ch in counts) counts[ch]++;
   }
-  const [delim] = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const [delim] = Object.entries(counts).sort((a, b) => b[1] - a[1]).map((entry) => entry[0]);
   return counts[delim] > 0 ? delim : ';';
 }
 
@@ -210,7 +210,7 @@ function parseXlsxSheet(buffer) {
       companyId: pick('companyId') != null ? String(pick('companyId')).trim() : null,
     });
   });
-  return { records, rowErrors, format: 'xlsx', map };
+  return { records, rowErrors, format: 'xlsx', map, rows: dataRows.length };
 }
 
 /* ----------------------------- CSV ----------------------------- */
@@ -266,7 +266,7 @@ function parseCsvBuffer(buffer) {
       companyId: pick('companyId') ? String(pick('companyId')).trim() : null,
     });
   });
-  return { records, rowErrors, format: isOrganizer ? 'organizer' : 'legacy', map };
+  return { records, rowErrors, format: isOrganizer ? 'organizer' : 'legacy', map, rows: dataRows.length };
 }
 
 /* ----------------------------- дубли и итог импорта ----------------------------- */
@@ -321,7 +321,7 @@ export async function parseBankStatement(buffer, filename = '', userInn = null) 
   const name = String(filename || '').toLowerCase();
   const isXlsx = name.endsWith('.xlsx') || (Buffer.isBuffer(buffer) && buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b);
   const parsed = isXlsx ? parseXlsxSheet(buffer) : parseCsvBuffer(buffer);
-  const { records, rowErrors, format, map } = parsed;
+  const { records, rowErrors, format, map, rows } = parsed;
 
   if (format === 'empty') {
     return {
@@ -356,7 +356,9 @@ export async function parseBankStatement(buffer, filename = '', userInn = null) 
     meta: {
       format,
       companyId: format === 'organizer' ? companyId : null,
-      rowsTotal: records.length + duplicatesRemoved,
+      // ТЗ-доработка WP-7 §5: rowsTotal = все строки данных файла (включая битые),
+      // чтобы skipped = rowsTotal − imported − duplicatesRemoved совпадал с числом ошибок строк.
+      rowsTotal: rows ?? records.length + duplicatesRemoved,
       rowsSkipped: rowErrors.length,
       duplicatesRemoved,
       possibleDuplicates,
