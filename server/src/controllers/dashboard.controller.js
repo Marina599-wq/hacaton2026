@@ -2,10 +2,11 @@
 import { prisma } from '../config/db.js';
 import { calculateForecast } from '../services/forecast.service.js';
 import { FORECAST_CONFIG } from '../config/forecast.config.js';
-import { markOverdueEvents } from './plannedEvents.controller.js';
+import { buildPlanFactAlerts, planFactService } from '../services/planFact.service.js';
 import { getAsOfDate } from '../utils/asOf.js';
 import { analyzeStatement } from '../utils/dataQuality.js';
 import { env } from '../config/env.js';
+import { performance } from 'node:perf_hooks';
 
 export async function getDashboard(req, res, next) {
   try {
@@ -21,11 +22,15 @@ export async function getDashboard(req, res, next) {
       where: { userId, active: true }
     });
 
+    // ТЗ-доработка WP-5 (дефект 3): сначала СВЕРКА план-факт (статусы paid/partial/paid_late/overdue
+    // записаны в БД), ТОМЧИ чтение событий и расчёт прогноза — иначе первый запрос после
+    // появления просрочки считает прогноз по устаревшим статусам
+    await planFactService.reconcileForUser(userId);
+
     // Плановые события (ТЗ-доп.): активные и неоплаченные; детектор просрочки обновляет статусы
     const plannedEvents = await prisma.plannedEvent.findMany({
       where: { userId, active: true, status: { not: 'paid' } },
     });
-    if (plannedEvents.length) await markOverdueEvents(prisma, userId);
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
 
@@ -35,26 +40,34 @@ export async function getDashboard(req, res, next) {
       : 0;
 
     // Опорная дата прогноза (ТЗ-доработка WP-7 §9): свежая выписка (≤ 3 дн.) — текущая дата,
-    // старая — последняя дата выписки; override демо-даты через FORECAST_AS_OF
+    // старая — последняя дата выписки. FORECAST_AS_OF — только для демо-учётки (контракт
+    // demo@cashflow.ru, prisma/seed); обычные пользователи берут asOf из своих данных.
+    const DEMO_EMAIL = 'demo@cashflow.ru';
     const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
-    const asOf = env.FORECAST_AS_OF || getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
+    const asOf = user?.email === DEMO_EMAIL && env.FORECAST_AS_OF
+      ? env.FORECAST_AS_OF
+      : getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
 
     // Рассчитываем прогноз кассовых разрывов (только активные риски)
     const minThreshold = user?.minBalance ?? 0;
-    // ТЗ-доработка WP-7 §9: при истории ≤ 14 дней Монте-Карло не запускать
+    // ТЗ-доработка WP-7 §10: при истории < 14 дней Монте-Карло не запускать
     const historyDays = operations.length > 1 ? Math.round((lastOpDate - operations[0].date) / 86_400_000) + 1 : 0;
+    // ТЗ-доработка WP-8 п.7: видимость расчёта — meta.computed + время в мс. Минимум:
+    // инкрементальное состояние (ForecastState) не реализовано → всегда "full".
+    const t0 = performance.now();
     const forecastResult = calculateForecast(operations, risks, currentBalance, horizon, minThreshold, {
       plannedEvents, // ТЗ-доп. §4.3: плановые события в расчётном ядре и Монте-Карло
       today: asOf,
-      mcDisabled: historyDays <= 14,
+      mcDisabled: historyDays < 14,
     });
+    const computedMs = Math.round(performance.now() - t0);
 
-    // Подсчет итогов за последние 30 дней (доход, расход, остаток)
-    const now = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(now.getDate() - 30);
-
-    const recentOps = operations.filter(op => new Date(op.date) >= thirtyDaysAgo);
+    // Подсчет итогов за 30 дней от опорной даты (WP-7 §9: итоги от asOf, не от сегодня):
+    // окно (asOf − 30 дн … asOf]
+    const asOfMs = new Date(`${asOf}T00:00:00Z`).getTime();
+    const recentOps = operations.filter(
+      (op) => op.date.getTime() <= asOfMs + 86_400_000 - 1 && op.date.getTime() >= asOfMs - 30 * 86_400_000,
+    );
     const totalIncome = recentOps.filter(op => op.direction === 'in').reduce((sum, op) => sum + op.amount, 0);
     const totalExpense = recentOps.filter(op => op.direction === 'out').reduce((sum, op) => sum + op.amount, 0);
 
@@ -66,6 +79,8 @@ export async function getDashboard(req, res, next) {
       // Контрактные ключи (docs/api-contract.md): threshold/loanRatePct
       threshold: minThreshold,
       loanRatePct: FORECAST_CONFIG.loanRatePct,
+      asOf, // ТЗ-доработка WP-7 §9: опорная дата прогноза (top-level, дублируется в dataQuality.asOf)
+      meta: { computed: 'full', computedMs }, // ТЗ-доработка WP-8 п.7: видимость расчёта (инкрементальность не заявлена — всегда full)
       summary: {
         income: Math.round(totalIncome * 100) / 100,
         expense: Math.round(totalExpense * 100) / 100,
@@ -73,6 +88,8 @@ export async function getDashboard(req, res, next) {
         balance: currentBalance
       },
       ...forecastResult,
+      // ТЗ-доработка WP-5 п.6: предупреждения (planned_overdue / regular_missing / разрыв — critical)
+      alerts: buildPlanFactAlerts({ events: plannedEvents, forecast: forecastResult, operations, today: new Date() }),
       // Слитое поле качества (ТЗ-доработка §1, §10): уровень ядра + пропуски/пустые ИНН/овердрафт + опорная дата
       dataQuality: {
         ...forecastResult.dataQuality,

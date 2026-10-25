@@ -18,13 +18,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseBankStatement } from '../src/utils/parser.js';
 import { calculateForecast } from '../src/services/forecast.service.js';
 import { FORECAST_CONFIG } from '../src/config/forecast.config.js';
 
 // ------------------------------- параметры -------------------------------
 
-const DEFAULT_STATEMENTS_DIR = path.resolve(process.cwd(), 'test-data/statements');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DEFAULT_STATEMENTS_DIR = path.join(REPO_ROOT, 'test-data', 'statements');
 const MIN_HISTORY_MONTHS = 18; // ТЗ §13
 const HORIZON_DAYS = 30; // ТЗ §13
 const MIN_GAP_PROBABILITY_PCT = 30; // ТЗ §13
@@ -258,7 +260,7 @@ console.log(`\nВыбрано ${picked.length} компаний (виды биз
 for (const c of picked) {
   const rows = copied.filter((r) => r.to.includes(c.cid));
   for (const r of rows) {
-    console.log(`  ${path.relative(process.cwd(), r.to)} (${r.size} Б)  <-  ${r.from}`);
+    console.log(`  ${path.relative(REPO_ROOT, r.to)} (${r.size} Б)  <-  ${path.relative(REPO_ROOT, r.from)}`);
   }
   console.log(`  ${c.cid}: asOf=${c.asOf}  T(P10)=${Math.round(c.threshold)} ₽  gapProbabilityPct=${c.gap}%  история=${c.months} мес  строк=${c.rows}  вид=${c.business}`);
 }

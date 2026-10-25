@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { maskName, maskInn } from '../utils/masking.js';
 import { checkCounterparty, ensureCounterpartyRisk } from '../services/counterpartyCheck.service.js';
 import { calculateUpcomingTaxes } from '../services/taxCalendar.service.js';
+import { planFactService } from '../services/planFact.service.js';
 
 const plannedEventBody = z.object({
   type: z.enum(['contract', 'invoice', 'tax']),
@@ -36,7 +37,9 @@ export async function markOverdueEvents(db, userId, today = new Date()) {
 
 // Список + summary + сводка по налогам (GET /api/planned-events)
 export async function listPlannedEvents(db, userId, query = {}) {
-  await markOverdueEvents(db, userId);
+  // ТЗ-доработка WP-5: перед чтением — полная сверка план-факт (заменяет markOverdueEvents,
+  // которая не проверяла ИНН и не переводила в paid/partial)
+  await planFactService.reconcileForUser(userId);
   const where = { userId };
   if (query.type) where.type = query.type;
   if (query.source) where.source = query.source;

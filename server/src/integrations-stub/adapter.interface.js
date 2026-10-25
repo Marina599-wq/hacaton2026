@@ -10,7 +10,6 @@ export class BaseAdapter {
     this.code = code;
     this.label = label;
   }
-  // eslint-disable-next-line no-unused-vars
   async sync() {
     throw new Error('adapter.sync() not implemented');
   }

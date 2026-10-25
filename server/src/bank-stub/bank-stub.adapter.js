@@ -1,5 +1,5 @@
 export class BankStubAdapter {
-  async connect(credentials) {
+  async connect(_credentials) {
     return { connected: true, provider: 'stub' };
   }
 

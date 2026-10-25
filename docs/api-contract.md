@@ -11,12 +11,13 @@
 | Код | HTTP | Когда |
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | нет/истёк токен |
+| `INVALID_CREDENTIALS` | 401 | неверный email/пароль при `/auth/login` |
 | `UNAUTHORIZED` | 403 | нет доступа к ресурсу (чужие данные) |
 | `NOT_FOUND` | 404 | ресурс не найден |
 | `VALIDATION` | 422 | ошибка валидации (в message — поле) |
 | `RISK_NOT_DELETABLE` | 400 | попытка удалить авто-риск |
 | `FILE_INVALID` | 422 | файл выписки: формат/размер/колонки |
-| `RATE_LIMITED` | 429 | rate limit на `/auth/*` |
+| `RATE_LIMITED` | 429 | rate limit: 300 запросов / мин на `/api/*`, 10 / мин на `/auth/*` |
 | `INTERNAL` | 500 | ошибка сервера |
 
 ## Общие типы
@@ -69,6 +70,7 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 ### GET /auth/me → `{ "user": User }`
 
 ### PATCH /user
+### PATCH /auth/user
 
 - Тело: произвольное `{ "companyName?" , "inn?" , "minBalance?" }`; `minBalance` — порог разрыва T (₽, ≥ 0),
   влияет на `dangerDays` и блок разрыва в прогнозе (ТЗ §14: настраивается пользователем, по умолчанию 0).
@@ -93,19 +95,64 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 
 ```json
 {
-  "balance": 1234567.89,
+  "currentBalance": 1234567.89,
   "threshold": 0,
-  "horizon": 90,
   "loanRatePct": 9.5,
-  "summary": { "income": 0, "expense": 0, "balanceChange": 0 },
-  "forecast": { "series": [], "gapDate": "2026-11-02", "gapProbabilityPct": 64, "gapAmount": 185000 },
+  "asOf": "2026-09-29",
+  "meta": { "computed": "full", "computedMs": 42 },
+  "summary": { "income": 0, "expense": 0, "balanceChange": 0, "balance": 0 },
+  "gapDate": "2026-11-02",
+  "gapProbabilityPct": 64,
+  "gapAmount": 185000,
+  "gapAmountMedian": 150000,
+  "gapAmountP90": 320000,
+  "probableGapDate": "2026-11-02",
+  "alreadyBelowThreshold": false,
+  "dangerProbabilityByDay": [0, 1, 4],
+  "cumulativeGapProbabilityByDay": [0, 1, 5],
+  "minForecastBalance": -185000,
+  "forecastSeries": [{ "date": "2026-09-30", "income": 0, "expense": 0, "balance": 0, "balanceLow": 0, "balanceMedian": 0, "balanceHigh": 0 }],
   "dangerDays": ["2026-11-02"],
-  "goodDays": ["2026-11-15"]
+  "goodDays": ["2026-11-15"],
+  "regularPayments": [{ "amount": 45000, "every": "monthly", "lastDate": "2026-09-05", "confidence": 0.9 }],
+  "dataQuality": {
+    "level": "good",
+    "asOf": "2026-09-29",
+    "gapsDays": 0,
+    "gaps": [{ "from": "2026-01-01", "to": "2026-01-03" }],
+    "emptyInnRows": 12,
+    "emptyPurposeRows": 3,
+    "overdraftDays": 0,
+    "historyLevel": "full",
+    "historyDays": 720
+  }
 }
 ```
 
-- `loanRatePct` (опционально): условная ставка банковского займа, % — фиксированная константа из конфига
-  бэкенда; отображается на странице «Запрос у банка» (ТЗ §5.7).
+- `currentBalance` — остаток на опорную дату (отдельное `balance` в сумме нет: `summary.balance` = текущий остаток).
+- `loanRatePct` (опционально): условная ставка банковского займа, % — фиксированная константа
+  из конфига бэкенда; отображается на странице «Запрос у банка» (ТЗ §5.7).
+- `asOf` (top-level, дублируется в `dataQuality.asOf`): опорная дата прогноза (ТЗ-доработка §9):
+  свежая выписка (≤ 3 дн.) — текущая дата, старая — последняя дата выписки; `FORECAST_AS_OF`
+  из `server/.env` применяется только к демо-учётке `demo@cashflow.ru`.
+- `meta.computed` (ТЗ-доработка WP-8 п.7): `"full"` или `"incremental"` + время расчёта в мс.
+  Минимальная реализация: инкрементальное состояние не введено → всегда `"full"`.
+- `dataQuality` — слитое поле качества (ТЗ-доработка §1, §10): уровень ядра (`level`),
+  пропуски (`gapsDays`, `gaps`), пустые ИНН/назначения, овердрафт (`overdraftDays`) —
+  из него клиент рендерит алерты; `historyLevel: "insufficient"` при истории < 14 дней
+  (тогда Монте-Карло не запускается: `gapProbabilityPct` и квантили разрыва — `null`).
+- `summary` — итоги за 30 дней от опорной даты (`asOf − 30 дн … asOf`), а не от сегодня.
+- `gapProbabilityPct` — вероятность, что разрыв случится в течение горизонта; при `mcDisabled` — `null`.
+
+### GET /dashboard/plan-fact?month=YYYY-MM
+
+План-факт месяца (WP-6): `POST /planned-events` создаёт «план» на месяц; ответ:
+
+```json
+{ "month": "2026-11", "netPlan": -120000, "netActual": -180000, "diff": -60000, "planEvents": 4, "frozen": false }
+```
+
+- `frozen=true` — месяц закрыт (факт зафиксирован, план пересчитывается только от него).
 
 ### GET /operations?month=YYYY-MM&category=&page=1&limit=20
 
@@ -119,6 +166,34 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 { "date": "2026-10-25", "amount": 15000, "direction": "out", "counterpartyName": "ИП Смирнов", "purpose": "Аренда офиса" }
 ```
 → `201 Operation` (`source="manual"`, `balanceEndOfDay` считает сервер).
+
+### POST /operations/import — multipart/form-data
+
+Поле `file`: CSV (BOM, `;`/`,`/таб — автоопределение разделителя) или XLSX, ≤ 25 МБ.
+Категория каждой операции вычисляется категоризатором (WP-3), кроме `categorySource="manual"`.
+→ `201`:
+
+```json
+{ "rowsTotal": 1000, "imported": 980, "skipped": 20, "duplicatesRemoved": 3, "possibleDuplicates": 1, "warnings": ["…"], "dataQuality": { "…": "см. /dashboard" }, "removed": 0, "format": "organizer", "companyId": "C001" }
+```
+
+- 422 `FILE_INVALID` — формат/размер/колонки (пользователь не создаётся, если импорт — часть регистрации).
+- Двойной импорт того же файла не дублирует операции (по `externalId`).
+
+### POST /operations/bulk
+
+Массив операций в теле `{ "operations": [Operation…] }` → `201 { "imported": N, "asOf": "YYYY-MM-DD" }`.
+
+### POST /operations/reassign
+
+`{ "fromDate": "YYYY-MM-DD", "toDate": "YYYY-MM-DD", "category": "tax" }` → `{ "updated": N }`
+(перекатегоризация диапазона, `categorySource="manual"`).
+
+### PATCH /operations/:id
+
+Тело: `{ "subcategory": "rent" }` — значение только из таксономии (см. `GET /categories`);
+меняет категорию и ставит `categorySource="manual"` (ТЗ-доработка §8 п.8). → `200 Operation`.
+`404 NOT_FOUND` — нет/не владельца.
 
 ### GET /history/summary?month=YYYY-MM&category=
 
@@ -143,6 +218,41 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 
 ### DELETE /risks/:id → `204`; для `source="auto"` → `400 RISK_NOT_DELETABLE`.
 
+### GET /planned-events?type=&source=
+
+Плановые события (налоги, аренда, договоры, WP-4): `{ "events": [PlannedEvent], "summary": { "totalExpectedIn", "totalExpectedOut", "upcomingTaxes", "overdueCount", "highRiskInAmount" } }`.
+`PlannedEvent`: `{ id, title, type: "tax" | "rent" | "contract" | "salary" | "other", direction: "in" | "out", amount, expectedDate, issueDate?, deferralDays?, prepaymentPct?, counterpartyRisk?, source: "manual" | "system" | "tax-calendar", status: "pending" | "paid" | "overdue", active }`.
+
+### POST /planned-events
+
+```json
+{ "title": "Аренда офиса", "type": "rent", "direction": "out", "amount": 250000, "expectedDate": "2026-11-05", "deferralDays": 14, "prepaymentPct": 30 }
+```
+- Договор (А, ТЗ-доп. §4.1): `0 < prepaymentPct < 100` → две записи (предоплата + постоплата с отсрочкой `deferralDays`).
+- → `201 { "events": [PlannedEvent] }`.
+
+### PATCH /planned-events/:id
+
+Подмножество: `{ "active": false }`, `{ "status": "paid" }`, `{ "amount": 200000 }` → `{ "event": PlannedEvent }`.
+
+### GET /categories
+
+Таксономия категоризатора (WP-3): `[{ "id": "tax", "subcategoryIds": ["vat", "income_tax", …], "labels": { "vat": "НДС", … } }]`.
+
+### GET /counterparty?name=&inn=
+
+Проверка контрагента (заглушка, WP-6): `{ "name", "inn", "riskLevel": "low" | "medium" | "high", "notes" }`.
+
+### GET /demo/companies
+
+Демо-выписки из `test-data/demo/` (ТЗ-доработка п.13): `{ "companies": [{ "file", "label" }] }`.
+
+### POST /demo
+
+Загрузка выбранной демо-выписки в учётку: `{ "file": "statement-demo-C001.csv" }`
+→ `201 { "file", "operationsImported", "replaced", "asOf", "rowErrors" }`
+(старые операции с `source="demo"` заменяются; `asOf` — последняя дата выписки).
+
 ### GET /gap/self-loans → `{ "items": [Operation] }` (операции с `source="self_loan"`)
 
 ### POST /gap/self-loan
@@ -157,6 +267,18 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 `{ "amount": 185000, "termDays": 90 }` →
 `{ "status": "approved", "ratePct": 14.5, "operation": Operation }`
 (`source="bank_loan"`; `ratePct` — константа из конфига бэкенда).
+
+### POST /bank/connect (заглушка)
+
+→ `{ "connected": true, "provider": "stub" }` (подключение банка — заглушка WP-6).
+
+### POST /bank/sync (заглушка)
+
+Синхронизация выписок: → `{ "synced": true, "new": N, "operations": [Operation] }` (`source="bank_stub"`).
+
+### GET /bank/accounts (заглушка)
+
+→ `[]` (список счетов; заглушка пока пустая).
 
 ### POST /bank/payments (заглушка, задержка 500–1000 мс)
 
@@ -195,7 +317,12 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 `delta = scenario − base` (п.п. для вероятности, рубли для суммы; отрицательное = разрыв стал меньше).
 Сценарий **не сохраняется** в реальные операции.
 
-### GET /calendar?month=YYYY-MM
+### POST /sandbox/reset
+
+Удаляет сохранённые карточки сценариев пользователя (localStorage/БД) → `{ "message": "Sandbox reset successfully" }`.
+
+### GET /calendar/month?month=YYYY-MM
+### GET /calendar/events?month=YYYY-MM
 
 ```json
 {
@@ -220,10 +347,71 @@ Paged<T> { items: T[], total: number, page: number, pages: number }
 
 ### GET /support/tickets → `SupportTicket[]` (только свои, newest first)
 
+### POST /integrations/:provider/sync
+
+Подключение интеграции (WP-6, заглушки): `:provider` — `tax-calendar` (налоговый календарь ФНС:
+создаёт `planned-event`'ы-налоги на квартал) или `counterparty` (проверка контрагентов, отчёт).
+→ `201 { "ok": true, "provider", "label", "created": N, "events": [PlannedEvent] }`.
+
+### DELETE /integrations/:provider/sync
+
+Отключение (WP-6): → `201` и снятие событий интеграции (provider-specific).
+
+### GET /integrations/counterparty?month=YYYY-MM
+
+Отчёт по проверкам контрагентов за месяц (заглушка WP-6).
+
+## ТЗ-доработка WP-4: негативные сценарии «что если»
+
+Сценарии применяются **внутри расчётного ядра** (через `options.scenarios` в `calculateForecast`), а не
+подменой фиктивных операций (legacy-режим песочницы `POST /sandbox/simulate` остаётся).
+Описание типов, диапазонов и формул — `docs/SCENARIOS.md`.
+
+### POST /scenarios/simulate
+
+Тело: `{ scenarios: [ { type, params }, … ] (1–4, разные типы), horizonDays? }`. Типы и параметры:
+`client_delay { inn, days 14..28 }`, `revenue_drop { percent 0..30, fromDate?, durationDays? }`,
+`unplanned_expense { amount?, date? }` (amount не задан = нулевой сценарий; date не раньше завтра),
+`fixed_costs_growth { percent 0..50, fromDate? }`. Горизонт и порог — как у главного прогноза.
+
+→ `200 { base, scenario, isolated[], delta, asOf, scenarios }`, где `base`/`scenario` —
+`{ series: [{ date, balance, p10, p90 }], gapDate, gapAmount, gapProbabilityPct, minBalance, dangerDays, threshold }`,
+`isolated` — каждый тип отдельно, `delta = { gapDateShiftDays, gapAmount, gapProbabilityPct, minBalance }`.
+`400 VALIDATION` — нарушены границы (5 сценариев, дубликат типа, percent за пределами, days вне 14–28,
+неизвестный type, дата расхода раньше завтра). Каждый выбранный сценарий сохраняется карточкой
+`SandboxScenario` (`kind` — тип, `params` — JSON; legacy остаётся `kind: 'custom_event'`).
+
+### GET /scenarios/clients
+
+Топ-5 контрагентов по доле в поступлениях за последние 6 месяцев:
+→ `200 { clients: [{ inn, name, totalIn6m, sharePct }], windowMonths: 6 }` — для prefill в `client_delay`.
+
+## ТЗ-доработка WP-5: график «План-факт»
+
+### GET /plan-fact?days=30|60|90&granularity=day|week
+
+План — прогноз (mean90), построенный на `cut = начало периода − 1 день` по данным и
+плановым событиям, известным на `cut` (`issueDate ≤ cut`); факт — операции периода без
+`subcategory ∈ {own_funds_in, own_funds_out, loan_in}`.
+→ `200 { days, granularity, cut, base: 'mean90', periods: [{ from, to, planIn, planOut, factIn, factOut, planNet, factNet, deviationNet, significant }] }`,
+где `significant = true`, если `|factNet − planNet| ≥ max(10 % от |planNet|, 10 000 ₽)`.
+Если до `cut` меньше 90 дней истории — `400 { error: { code: 'VALIDATION', message } }`.
+
+Статусы плановых событий сверки (`pending` / `paid` / `partial` / `paid_late` / `overdue`)
+обновляются автоматически: перед `GET /dashboard`, `GET /planned-events` и после
+`POST /operations`, импорта выписки/пакетного импорта и `GET /bank/transactions`.
+Ответ `GET /dashboard` содержит `alerts: [{ id, type, severity, title, message, date, amount }]`
+(`planned_overdue`, `regular_missing` — severity `warning`; при появлении разрыва —
+дополнительно `gap_forecast`, severity `critical`).
+
 ## Демо-данные
 
-Seed создаёт пользователя `demo@cashflow.ru / demo1234` с 18–24 месяцами операций,
-из которых алгоритм гарантированно находит разрыв в ближайшие 30–60 дней (демо-критерий, ТЗ §10).
+Seed создаёт демо-учётку `demo@cashflow.ru / demo1234` (контракт) — выписки берутся из
+`test-data/demo/` (3 файла, по одной компании из разных видов бизнеса; выбирает
+`server/scripts/pick-demo.mjs`, ТЗ-доработка п.13), а не из генератора.
+`FORECAST_AS_OF` в `server/.env` = последняя дата демо-выписки — применяется **только**
+к демо-учётке (у обычных пользователей `asOf` берётся из их выписки, ТЗ-доработка §9).
+Кнопка «Использовать демо-данные» → `POST /demo` (см. `test-data/README.md`).
 
 ## Примечания
 

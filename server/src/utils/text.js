@@ -36,10 +36,10 @@ export function normalizePurpose(purpose) {
  */
 export function normalizeForRules(purpose) {
   let s = String(purpose ?? '').toLowerCase().replace(/ё/g, 'е');
-  s = s.replace(/\b(?:н[оо])\.?\s*[#№]?\s*\d+(?:[\/-]?\d+)?/g, ' ');
+  s = s.replace(/\b(?:н[оо])\.?\s*[#№]?\s*\d+(?:[/-]?\d+)?/g, ' ');
   s = s.replace(new RegExp(MONTH_NAMES.source, 'g'), ' ');
   s = s.replace(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/g, ' ');
-  s = s.replace(/\b\d[\d\s]{2,}(\,\d+)?\b/g, ' ');
+  s = s.replace(/\b\d[\d\s]{2,}(,\d+)?\b/g, ' ');
   s = s.replace(/[^а-яеa-z\s]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
   s = s.replace(/\bнп\b/g, 'един налог платеж');

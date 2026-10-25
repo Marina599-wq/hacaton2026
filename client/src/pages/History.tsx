@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { api } from '@/api';
+import { api, subcategoryLabel } from '@/api';
 import { useAsync } from '@/hooks/useAsync';
 import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { CategoryPie } from '@/components/charts/CategoryPie';
@@ -191,7 +191,7 @@ export default function History() {
                           {op.counterpartyName}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
-                          {formatDate(op.date)} · {CATEGORY_LABELS[op.category] ?? op.category} · {op.purpose}
+                          {formatDate(op.date)} · {op.subcategory ? subcategoryLabel(op.subcategory) : CATEGORY_LABELS[op.category] ?? op.category} · {op.purpose}
                         </span>
                       </span>
                       <span

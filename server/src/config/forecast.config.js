@@ -61,5 +61,25 @@ export const FORECAST_CONFIG = {
   seasonalityDropThreshold: 0.20, // Порог сезонного спада дохода (20%)
   expenseVolatilityThreshold: 0.15, // Порог роста расходов (15%)
 
+  // ТЗ-доработка WP-4: негативные сценарии «что если»
+  scenarioClientShareMonths: 6, // Окно истории для долей контрагентов (client_delay, GET /scenarios/clients)
+
+  // ТЗ-доработка WP-5: сверка план-факт
+  planGraceDays: 3, // окно сверки: [expectedDate − 3, expectedDate + 3]
+  planMatchAmountTolerancePct: 1, // «paid» — сумма в пределах ±1 % от плана
+  planPartialMinPct: 10, // «partial» — от 10 % до 99 % плана (хранится paidAmount)
+  planFactDeviationPct: 10, // значимое отклонение: ≥ 10 % от |planNet|
+  planFactDeviationMinRub: 10000, // …или ≥ 10 000 ₽ (что больше)
+  planFactMinHistoryDays: 90, // до cut меньше 90 дней истории → 400
+
+  // Базовые подходы WP-2 (forecast.baselines.js): аддитивный Holt-Winters с периодом 7 дней.
+  // Дефолтные параметры: подбор на тренировочном периоде не проводился (датасет организаторов
+  // не в репозитории) — честность зафиксирована в docs/MODEL_COMPARISON.md.
+  holtwintersPeriod: 7,
+  holtwintersTrainWeeks: 13,
+  holtwintersAlpha: 0.3,
+  holtwintersBeta: 0.1,
+  holtwintersGamma: 0.15,
+
   loanRatePct: 0.15 // Условная ставка банковского займа, % 
 };

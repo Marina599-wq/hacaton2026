@@ -28,7 +28,11 @@ import type {
   PlannedEvent,
   PlannedEventsResponse,
   PlanFactResponse,
+  PlanFactPeriodsResponse,
   Risk,
+  ScenarioClientsResponse,
+  ScenarioSimulateRequest,
+  ScenarioSimulateResponse,
   SandboxSimulateRequest,
   SandboxSimulateResponse,
   SupportTicket,
@@ -124,12 +128,19 @@ export const api = {
       alreadyBelowThreshold: d.alreadyBelowThreshold === true || undefined,
       dangerDays: (Array.isArray(d.dangerDays) ? d.dangerDays : []) as string[],
       goodDays: (Array.isArray(d.goodDays) ? d.goodDays : []) as string[],
+      // ТЗ-доработка WP-5 п.6: предупреждения (planned_overdue / regular_missing / gap_forecast)
+      alerts: Array.isArray(d.alerts) ? d.alerts : undefined,
     };
   },
   planFact: {
     /** Вкладка «План-факт» (ТЗ-доработка WP-5). */
     month: (month?: string) =>
       http.get<PlanFactResponse>(`/dashboard/plan-fact${qs({ month: month || undefined })}`),
+    /** Новый график «План-факт» (ТЗ WP-5): периоды день/неделя, 30/60/90 дней. */
+    periods: (days: 30 | 60 | 90, granularity: 'day' | 'week') =>
+      http.get<PlanFactPeriodsResponse>(
+        `/plan-fact${qs({ days: String(days), granularity })}`,
+      ),
   },
   categories: {
     /** Каталог категорий и подкатегорий (ТЗ-доработка §2.1). */
@@ -222,6 +233,14 @@ export const api = {
   sandbox: {
     simulate: (body: SandboxSimulateRequest) =>
       http.post<SandboxSimulateResponse>('/sandbox/simulate', body),
+  },
+  /** ТЗ-доработка WP-4: негативные сценарии «что если» (сценарий внутри ядра, без фиктивных операций). */
+  scenarios: {
+    /** base + scenario + isolated[] + delta. Валидация границ — 400 VALIDATION. */
+    simulate: (body: ScenarioSimulateRequest) =>
+      http.post<ScenarioSimulateResponse>('/scenarios/simulate', body),
+    /** Топ-5 клиентов по доле в поступлениях за 6 месяцев (prefill для client_delay). */
+    clients: () => http.get<ScenarioClientsResponse>('/scenarios/clients'),
   },
   calendar: {
     /** Контрактный GET /calendar/month?month=YYYY-MM; ответ нормализуем к контракту. */

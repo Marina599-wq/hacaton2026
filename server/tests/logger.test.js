@@ -2,10 +2,6 @@
 // перехват console и stdout во время серии запросов (регистрация, вход, импорт файла,
 // ошибка валидации, ошибка БД) — в выводе нет ни одного из проверочных значений.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Проверочные значения: в логах после серии запросов их быть не должно.
 const SENSITIVE = {};

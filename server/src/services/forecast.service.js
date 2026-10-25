@@ -6,6 +6,8 @@ import { FORECAST_CONFIG } from '../config/forecast.config.js';
 import { findGaps } from '../utils/dataQuality.js';
 // ТЗ-доработка WP-3 п.6: normalizePurpose вынесен в utils/text.js
 import { normalizePurpose } from '../utils/text.js';
+// ТЗ-доработка WP-4: негативные сценарии «что если» (инертный слой, активен только с options.scenarios)
+import { REVENUE_SUBCATS, FIXED_SUBCATS, parseScenarios, buildScenarioPlan, applyScenariosToPlan } from './forecast.scenarios.js';
 
 const DAY_MS = 86_400_000;
 const FINANCING_SOURCES = new Set(['self_loan', 'bank_loan']);
@@ -220,7 +222,10 @@ function detectRegularPayments(history, today, cfg) {
         monthsCount: months.size,
         title: matching[0].purpose || matching[0].name || 'Регулярный платёж',
         amounts,
-        ops: matching.flatMap((op) => op.parts)
+        ops: matching.flatMap((op) => op.parts),
+        // ТЗ-доработка WP-4: атрибуция для сценариев (revenue_drop / fixed_costs_growth / client_delay)
+        subcategory: matching[0].subcategory ?? null,
+        inn: matching[0].inn ?? '',
       });
     }
   }
@@ -254,12 +259,22 @@ function calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet = new 
   const incomes = new Float64Array(windowDays);
   const expenses = new Float64Array(windowDays);
   let totalIncome = 0;
+  // ТЗ-доработка WP-4: атрибуция для сценариев — revenue-поступления и rent/suppliers списания по дням окна
+  const revenueIncomes = new Float64Array(windowDays);
+  const rentSupplierExpenses = new Float64Array(windowDays);
 
   for (const op of base) {
     if (op.day < windowStart) continue;
     if (op.direction === 'in') totalIncome += op.amount;
     if (regularOps.has(op)) continue;
-    (op.direction === 'in' ? incomes : expenses)[op.day - windowStart] += op.amount;
+    const idx = op.day - windowStart;
+    if (op.direction === 'in') {
+      incomes[idx] += op.amount;
+      if (REVENUE_SUBCATS.has(op.subcategory)) revenueIncomes[idx] += op.amount;
+    } else {
+      expenses[idx] += op.amount;
+      if (FIXED_SUBCATS.has(op.subcategory)) rentSupplierExpenses[idx] += op.amount;
+    }
   }
 
   // Винсоризация (ТЗ-доработка WP-7 §12): суточная сумма не превышает k-й квантиль ненулевых сумм своего направления
@@ -274,10 +289,13 @@ function calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet = new 
     for (let k = 0; k < windowDays; k++) {
       if (incomes[k] > capIn) incomes[k] = capIn;
       if (expenses[k] > capOut) expenses[k] = capOut;
+      // подмножества не могут превысить тот же верх (последовательность winsor'а)
+      if (revenueIncomes[k] > capIn) revenueIncomes[k] = capIn;
+      if (rentSupplierExpenses[k] > capOut) rentSupplierExpenses[k] = capOut;
     }
   }
 
-  const acc = Array.from({ length: 7 }, () => ({ n: 0, sIn: 0, sOut: 0, qIn: 0, qOut: 0 }));
+  const acc = Array.from({ length: 7 }, () => ({ n: 0, sIn: 0, sOut: 0, qIn: 0, qOut: 0, sInR: 0, sOutF: 0 }));
   for (let k = 0; k < windowDays; k++) {
     if (gapDaySet.has(windowStart + k)) continue; // пропущенные дни в статистику не входят
     const a = acc[weekdayOf(windowStart + k)];
@@ -286,6 +304,8 @@ function calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet = new 
     a.sOut += expenses[k];
     a.qIn += incomes[k] * incomes[k];
     a.qOut += expenses[k] * expenses[k];
+    a.sInR += revenueIncomes[k];
+    a.sOutF += rentSupplierExpenses[k];
   }
 
   const stdOf = (sum, sumSq, n) => (n > 1 ? Math.sqrt(Math.max(0, (sumSq - (sum * sum) / n) / (n - 1))) : 0);
@@ -293,7 +313,10 @@ function calculateWeekdayStats(history, regularOps, today, cfg, gapDaySet = new 
     avgIncome: a.n ? a.sIn / a.n : 0,
     avgExpense: a.n ? a.sOut / a.n : 0,
     stdIncome: stdOf(a.sIn, a.qIn, a.n),
-    stdExpense: stdOf(a.sOut, a.qOut, a.n)
+    stdExpense: stdOf(a.sOut, a.qOut, a.n),
+    // ТЗ-доработка WP-4: revenue-доля притоков и rent/suppliers-доля списаний в среднем по дню недели
+    avgRevenueIn: a.n ? a.sInR / a.n : 0,
+    avgRentSupplierOut: a.n ? a.sOutF / a.n : 0
   }));
 
   return {
@@ -345,7 +368,10 @@ function collectScheduledEvents(normalized, extraEvents, today, horizon, planned
       kind: op.isFinancing ? 'financing' : 'scheduled',
       direction: op.direction,
       amount: op.amount,
-      title: op.isFinancing ? FINANCING_TITLES[op.source] : op.purpose || op.name || 'Запланированная операция'
+      title: op.isFinancing ? FINANCING_TITLES[op.source] : op.purpose || op.name || 'Запланированная операция',
+      // ТЗ-доработка WP-4: атрибуция для сценариев (revenue_drop / fixed_costs_growth / client_delay)
+      subcategory: op.subcategory ?? null,
+      inn: op.isFinancing ? '' : op.inn ?? ''
     });
   }
 
@@ -360,7 +386,10 @@ function collectScheduledEvents(normalized, extraEvents, today, horizon, planned
       kind: 'scenario',
       direction: ev.direction,
       amount,
-      title: ev.title || ev.name || 'Сценарий'
+      title: ev.title || ev.name || 'Сценарий',
+      // ТЗ-доработка WP-4: атрибуция для сценариев
+      subcategory: ev.subcategory ?? null,
+      inn: ev.inn ?? ev.counterpartyInn ?? ''
     });
   }
 
@@ -371,15 +400,22 @@ function collectScheduledEvents(normalized, extraEvents, today, horizon, planned
     let day = toDayIndex(ev.expectedDate);
     if (day === null) continue;
     if (ev.status === 'overdue') day = today + cfg.plannedOverdueShiftDays;
-    const amount = Math.abs(Number(ev.amount));
+    let amount = Math.abs(Number(ev.amount));
     if (!Number.isFinite(amount) || amount === 0) continue;
+    // ТЗ-доработка WP-5: частично оплаченные события учитываются в прогнозе на остаток (amount − paidAmount)
+    if (ev.status === 'partial') {
+      amount = Math.max(0, amount - Math.abs(Number(ev.paidAmount) || 0));
+      if (amount === 0) continue; // полностью покрыт фактом — не учитывается
+    }
     const direction = ev.direction === 'in' ? 'in' : 'out';
     if (direction === 'in') {
       plannedInEvents.push({
         day,
         amount,
         delayProb: ev.counterpartyRisk === 'high' ? cfg.plannedDelayProbHigh
-          : ev.counterpartyRisk === 'medium' ? cfg.plannedDelayProbMedium : 0
+          : ev.counterpartyRisk === 'medium' ? cfg.plannedDelayProbMedium : 0,
+        // ТЗ-доработка WP-4: контрагент планового поступления (client_delay)
+        inn: ev.counterpartyInn ?? ''
       });
     }
     const i = day - today - 1;
@@ -388,7 +424,10 @@ function collectScheduledEvents(normalized, extraEvents, today, horizon, planned
       kind: 'planned',
       direction,
       amount,
-      title: ev.title || 'Запланированный платёж'
+      title: ev.title || 'Запланированный платёж',
+      // ТЗ-доработка WP-4: атрибуция для сценариев
+      subcategory: ev.subcategory ?? null,
+      inn: ev.counterpartyInn ?? ''
     });
   }
   return { byDay, plannedInEvents };
@@ -453,8 +492,15 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
       scheduledOut: 0,
       operatingIn: 0, // доход без займов — для «хороших» дней
       regularEvents: [], // для Монте-Карло: сумма берётся из реальных повторений платежа
-      reasons: []
+      reasons: [],
+      // ТЗ-доработка WP-4: атрибуция для сценариев (не выходит в отчёт без сценариев)
+      regularInRevenue: 0,
+      regularOutFixed: 0,
+      scheduledInRevenue: 0,
+      scheduledOutFixed: 0,
+      inflowsByInn: null
     };
+    const inflowsByInn = {};
 
     // Регулярный платёж срабатывает один раз в месяц; 31-е в коротком месяце → последний день
     for (const pay of regular) {
@@ -463,8 +509,11 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
       if (pay.direction === 'in') {
         day.regularIn += pay.amount;
         day.operatingIn += pay.amount;
+        if (REVENUE_SUBCATS.has(pay.subcategory)) day.regularInRevenue += pay.amount;
+        if (pay.inn && pay.inn !== 'SELF') inflowsByInn[pay.inn] = (inflowsByInn[pay.inn] ?? 0) + pay.amount;
       } else {
         day.regularOut += pay.amount;
+        if (FIXED_SUBCATS.has(pay.subcategory)) day.regularOutFixed += pay.amount;
       }
       day.reasons.push({ type: 'regular', title: pay.title, amount: signed });
       day.regularEvents.push({ sign: pay.direction === 'in' ? 1 : -1, amounts: pay.amounts });
@@ -474,8 +523,11 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
       if (ev.direction === 'in') {
         day.scheduledIn += ev.amount;
         if (ev.kind !== 'financing') day.operatingIn += ev.amount;
+        if (REVENUE_SUBCATS.has(ev.subcategory)) day.scheduledInRevenue += ev.amount;
+        if (ev.inn && ev.inn !== 'SELF') inflowsByInn[ev.inn] = (inflowsByInn[ev.inn] ?? 0) + ev.amount;
       } else {
         day.scheduledOut += ev.amount;
+        if (FIXED_SUBCATS.has(ev.subcategory)) day.scheduledOutFixed += ev.amount;
       }
       day.reasons.push({
         type: ev.kind,
@@ -483,6 +535,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
         amount: round2(ev.direction === 'in' ? ev.amount : -ev.amount)
       });
     }
+    if (Object.keys(inflowsByInn).length) day.inflowsByInn = inflowsByInn;
     days.push(day);
   }
   return days;
@@ -493,7 +546,7 @@ function buildDailyPlan({ today, horizon, regular, scheduled, cfg }) {
 // Монте-Карло (ТЗ §6.3): доля прогонов, где остаток ниже T. Нерегулярная часть — блочный bootstrap реальных дней того же дня недели
 // (сохраняет среднее, перекос и связь «приход/расход»); при короткой истории — усечённое нормальное с сохранением среднего.
 // Риски реализуются целиком со своей вероятностью; выводы владельцем ограничены остатком над «полом».
-function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], currentBalance, threshold, runs, seed, cfg, gapDaySet = new Set() }) {
+function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], currentBalance, threshold, runs, seed, cfg, gapDaySet = new Set(), scenarioPlan = null }) {
   const rng = createRng(seed);
   const normal = createNormalSampler(rng);
   const horizon = days.length;
@@ -580,7 +633,11 @@ function simulateGapProbability({ days, stats, riskPlans, plannedInEvents = [], 
         }
       }
 
-      balance += income - expense + schedNet[i] + regNet - loss + plannedAdjust;
+      // ТЗ-доработка WP-4: ожидаемые (deterministic) корректировки сценариев
+      const scAdjIn = scenarioPlan ? scenarioPlan.adjIncome[i] : 0;
+      const scAdjOut = scenarioPlan ? scenarioPlan.adjExpense[i] : 0;
+
+      balance += income - expense + scAdjIn - scAdjOut + schedNet[i] + regNet - loss + plannedAdjust;
       if (owner) {
         const w = owner.byWeekday[wd];
         const draw = Math.max(0, ownerMu[wd] + w.std * normal());
@@ -670,6 +727,37 @@ export function calculateForecast(
     ? options.goodDayThreshold
     : stats.avgDailyIncome * cfg.goodDayMultiplier;
 
+  // ТЗ-доработка WP-4: негативные сценарии «что если» — инертный слой, активен только при options.scenarios.
+  // Без сценариев (и со «нулевыми») результат побитово совпадает с прогнозом без hook.
+  let scenarios;
+  let scenarioPlan = null;
+  let scenarioNoOp = false;
+  if (Array.isArray(options.scenarios) && options.scenarios.length > 0) {
+    const parsed = parseScenarios(options.scenarios);
+    if (!parsed.ok) {
+      const err = new Error(parsed.error);
+      err.httpStatus = 400;
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    scenarios = parsed.scenarios;
+    let clientShareByInn = new Map();
+    if (scenarios.some((s) => s.type === 'client_delay')) {
+      clientShareByInn = computeClientInflowShares(history, today, cfg);
+    }
+    scenarioPlan = applyScenariosToPlan(
+      buildScenarioPlan({ days, stats, clientShareByInn }),
+      scenarios,
+      today,
+      horizon
+    );
+    // Нулевой сценарий (никаких действующих корректировок) — побитово база: без атрибутации
+    scenarioNoOp =
+      Array.from(scenarioPlan.adjIncome).every((v) => v === 0) &&
+      Array.from(scenarioPlan.adjExpense).every((v) => v === 0);
+  }
+  const attachScenarioAttribution = Boolean(scenarioPlan) && !scenarioNoOp;
+
   // Вероятность разрыва и полосы неопределённости (считаются до сборки ряда, чтобы вписать p10/p90 в каждую точку).
   // ТЗ-доработка WP-7 §9: при истории ≤ 14 дней MC не запускать (mcDisabled от контроллера).
   const mcDisabled = Boolean(options.mcDisabled);
@@ -685,7 +773,9 @@ export function calculateForecast(
         runs: cfg.monteCarloSimulations,
         seed: Number.isFinite(options.seed) ? options.seed : cfg.monteCarloSeed,
         cfg,
-        gapDaySet
+        gapDaySet,
+        // ТЗ-доработка WP-4: ожидаемые корректировки сценариев учитываются и в Монте-Карло
+        scenarioPlan
       });
 
   const monteCarloBand = monteCarlo.band;
@@ -700,8 +790,11 @@ export function calculateForecast(
 
   days.forEach((day, i) => {
     const st = stats.byWeekday[day.weekday];
-    const income = st.avgIncome + day.regularIn + day.scheduledIn;
-    const expense = st.avgExpense + day.regularOut + day.scheduledOut;
+    // ТЗ-доработка WP-4: корректировки сценариев (0 без сценариев — базовый ряд не меняется)
+    const scIn = scenarioPlan ? scenarioPlan.adjIncome[i] : 0;
+    const scOut = scenarioPlan ? scenarioPlan.adjExpense[i] : 0;
+    const income = st.avgIncome + day.regularIn + day.scheduledIn + scIn;
+    const expense = st.avgExpense + day.regularOut + day.scheduledOut + scOut;
 
     let riskLoss = 0;
     const reasons = [...day.reasons];
@@ -742,7 +835,20 @@ export function calculateForecast(
       balanceMedian: monteCarloBand ? round2(monteCarloBand.mid[i]) : null,
       balanceHigh: monteCarloBand ? round2(monteCarloBand.high[i]) : null,
       isDanger,
-      reasons
+      reasons,
+      // ТЗ-доработка WP-4: атрибуция для сценариев (только для действующих сценариев; нулевой — побитово база)
+      ...(attachScenarioAttribution
+        ? {
+            scenarioAttribution: {
+              revenueIn: round2(scenarioPlan.revenueIn[i]),
+              fixedOut: round2(scenarioPlan.fixedOut[i]),
+              scenRevenueIn: round2(scenarioPlan.scenRevenueIn[i]),
+              scenFixedOut: round2(scenarioPlan.scenFixedOut[i]),
+              inflowsByInn: scenarioPlan.inflowsByInn[i],
+              scenInflowsByInn: scenarioPlan.scenInflowsByInn[i]
+            }
+          }
+        : {})
     });
   });
 
@@ -814,6 +920,24 @@ function assessDataQuality(historyDays, stats, cfg) {
   }
   if (stats.ownerWithdrawals) warnings.push('Учтены регулярные выводы средств владельцем (не выше остатка над минимальным уровнем)');
   return { historyDays, level, warnings };
+}
+
+// ТЗ-доработка WP-4: доли контрагентов в поступлениях за последние N месяцев (6) — для client_delay
+// (доля нерегулярных поступлений конкретного клиента). Используются только сценариями и GET /scenarios/clients.
+export function computeClientInflowShares(history, today, cfg) {
+  const winStart = shiftMonths(today, -(cfg.scenarioClientShareMonths ?? 6));
+  let total = 0;
+  const byInn = new Map();
+  for (const op of history) {
+    if (op.day < winStart || op.day > today) continue;
+    if (op.direction !== 'in' || op.isFinancing || op.isTransfer) continue;
+    if (!op.inn || op.inn === 'SELF') continue;
+    total += op.amount;
+    byInn.set(op.inn, (byInn.get(op.inn) ?? 0) + op.amount);
+  }
+  const shares = new Map();
+  if (total > 0) for (const [inn, amt] of byInn) shares.set(inn, amt / total);
+  return shares;
 }
 
 // События песочницы (ТЗ §5.9): разовый платёж или ежемесячная серия из `repeats`; передаются через options.extraEvents.

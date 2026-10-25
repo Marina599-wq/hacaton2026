@@ -1,5 +1,6 @@
 import { prisma } from '../config/db.js';
 import { calculateForecast } from './forecast.service.js';
+import { getAsOfDate } from '../utils/asOf.js';
 import { FORECAST_CONFIG } from '../config/forecast.config.js';
 import { bankAdapter } from '../bank-stub/bank-stub.adapter.js';
 
@@ -79,7 +80,7 @@ export class BankService {
     return { synced: true, new: created.length, operations: created };
   }
 
-  async listAccounts(userId) {
+  async listAccounts(_userId) {
     return bankAdapter.accounts();
   }
 
@@ -165,6 +166,10 @@ export class BankService {
         op.balanceEndOfDay,
         90,
         minThreshold,
+        {
+          // ТЗ-доработка WP-7 §9: предупреждение после платежа строится от опорной даты
+          today: getAsOfDate(op.date ?? payDate, new Date()),
+        },
       );
       if (after.gapDate) {
         warning = {

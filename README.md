@@ -14,9 +14,9 @@
    сид; создаёт `server/.env` с JWT_SECRET, если файла нет
 3. `npm run dev` — сервер http://localhost:5000 и клиент
    http://localhost:5173 одновременно (проброс `/api` → `5000`)
-4. Открыть http://localhost:5173 → войти `demo@example.com` / `demo12345`
-   (или «Регистрация» — загрузка выписки CSV/XLSX по шаблону
-   `client/public/statement-template.csv`, 7 колонок)
+4. Открыть http://localhost:5173 → войти `demo@cashflow.ru` / `demo1234`
+   (сид из шага 2; контракт docs/api-contract.md), или «Регистрация» —
+   загрузка выписки CSV/XLSX по шаблону `client/public/statement-template.csv`
 5. В пустом состоянии — кнопка «Использовать демо-данные»: выписки из
    `test-data/demo/` (выбирает `server/scripts/pick-demo.mjs` из датасета
    организаторов в `test-data/statements/`; см. `test-data/README.md`)
@@ -31,7 +31,7 @@
 | `JWT_EXPIRES_IN` | server/.env | `24h` | срок жизни токена |
 | `CORS_ORIGINS` | server/.env | `http://localhost:5173` | разрешённые origin (через запятую) |
 | `NODE_ENV` | server/.env | `development` | в production заглушка `JWT_SECRET` запрещена |
-| `FORECAST_AS_OF` | server/.env | — | опорная дата прогноза (демо) |
+| `FORECAST_AS_OF` | server/.env | — | опорная дата прогноза (**только для демо-учётки** `demo@cashflow.ru`; обычные пользователи берут asOf из своей выписки, ТЗ-доработка §9) |
 | `VITE_PROXY_TARGET` | client/.env(.local) | `http://localhost:5000` | цель прокси `/api` |
 
 ## Команды (корень)
@@ -43,7 +43,7 @@
 | `npm test` | тесты сервера (vitest) |
 | `npm run lint` | lint клиента и сервера |
 | `npm run build` | сборка клиента → `client/dist` |
-| `npm run backtest` (из `server/`) | бэктест на датасете → `docs/BACKTEST.md` + `docs/backtest-results.json` |
+| `npm run backtest` | бэктест на датасете (`-- test-data/statements`) → `docs/BACKTEST.md` + `docs/backtest-results.json`; `-- --models all` (из `server/`) создаёт ещё `docs/MODEL_COMPARISON.md` (WP-2) |
 | `npm run verify` (из `client/`) | headless-проверки (build, design, TZ-зазоры) |
 
 ## Структура репозитория
@@ -57,8 +57,8 @@ server/          Express + Prisma/SQLite; routes → middleware (auth,
 test-data/       C001.csv (пример), demo/ (демо-выписки), statements/
                  (датасет организаторов — НЕ коммитится, test-data/README.md)
 docs/            api-contract.md, ARCHITECTURE.md, BACKTEST.md,
-                 MODEL_COMPARISON.md, CATEGORIZATION.md, SCENARIOS.md,
-                 SECURITY.md, PERFORMANCE.md, internal/ (архивные ТЗ)
+                 CATEGORIZATION.md, SECURITY.md, SCENARIOS.md (WP-4),
+                 MODEL_COMPARISON.md (WP-2), img/ (скриншоты), internal/ (архивные ТЗ)
 ```
 
 ## Документация
@@ -68,10 +68,10 @@ docs/            api-contract.md, ARCHITECTURE.md, BACKTEST.md,
   (машинная сверка `server/scripts/check-contract.mjs`)
 - [`docs/SECURITY.md`](docs/SECURITY.md) — «угроза / мера / где реализовано»
 - [`docs/BACKTEST.md`](docs/BACKTEST.md) + `docs/backtest-results.json`
-- [`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md)
+- [`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md) — сравнение 7 подходов + абляция (WP-2; создаётся командой `npm run backtest -- test-data/statements -- --models all`)
 - [`docs/CATEGORIZATION.md`](docs/CATEGORIZATION.md)
-- [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — описания и формулы сценариев
-- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) — инкрементальный прогноз
+- [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — описания и формулы сценариев «что если» (WP-4)
+- Скриншоты интерфейса (WP-9): [`docs/img/dashboard.png`](docs/img/dashboard.png) — главная с разрывом, [`docs/img/plan-fact.png`](docs/img/plan-fact.png) — план-факт, [`docs/img/scenario.png`](docs/img/scenario.png) — сценарий «что если», [`docs/img/history.png`](docs/img/history.png) — история с диаграммой категорий
 
 ## Ограничения и допущения
 

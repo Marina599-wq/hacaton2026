@@ -6,15 +6,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { Badge, Button, Card, ErrorState, Skeleton, Select } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { formatDate, formatRub } from '@/lib/format';
-import type { CategoryConfidence, OperationCategory, OperationSource, Subcategory } from '@/types/api';
-
-const CONFIDENCE_LABELS: Record<CategoryConfidence, string> = {
-  high: 'высокая достоверность',
-  medium: 'средняя достоверность',
-  low: 'низкая достоверность',
-  manual: 'изменено вручную',
-  unclassified: 'не категоризовано',
-};
+import type { OperationCategory, OperationSource, Subcategory } from '@/types/api';
 
 const CATEGORY_LABELS: Record<OperationCategory, string> = {
   income: 'Доход',
@@ -66,7 +58,8 @@ export default function OperationDetails() {
     setReassigning(true);
     setReassignError(null);
     try {
-      await api.operations.reassign({ subcategory: selectedSub as Subcategory | '', operationIds: [opData.id] });
+      // ТЗ-доработка §2.3: PATCH /operations/:id — ручная перекатегоризация
+      await api.operations.patchOperation(opData.id, { subcategory: selectedSub as Subcategory | '' });
       op.refetch();
     } catch (err) {
       setReassignError(errorMessage(err));
@@ -74,6 +67,9 @@ export default function OperationDetails() {
       setReassigning(false);
     }
   }
+
+  const subLabel = (id: Subcategory) =>
+    cats.data?.subcategories.find((s) => s.id === id)?.label ?? id;
 
   return (
     <div className="space-y-4">
@@ -132,10 +128,12 @@ export default function OperationDetails() {
           <div className="mt-4 flex flex-wrap gap-2">
             <Badge tone="gray">{CATEGORY_LABELS[opData.category] ?? opData.category}</Badge>
             <Badge tone="blue">{SOURCE_LABELS[opData.source] ?? opData.source}</Badge>
-            {opData.confidence && (
-              <Badge tone={opData.confidence === 'manual' ? 'violet' : 'gray'}>
-                {CONFIDENCE_LABELS[opData.confidence] ?? opData.confidence}
-              </Badge>
+            {opData.subcategory && (
+              <Badge tone="blue">{subLabel(opData.subcategory)}</Badge>
+            )}
+            {opData.categorySource === 'manual' && <Badge tone="violet">изменено вручную</Badge>}
+            {opData.categoryConfidence != null && opData.categoryConfidence > 0 && (
+              <Badge tone="gray">достоверность {Math.round(opData.categoryConfidence * 100)}%</Badge>
             )}
           </div>
 

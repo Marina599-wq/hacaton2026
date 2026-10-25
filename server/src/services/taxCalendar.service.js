@@ -65,8 +65,9 @@ export function calculateUpcomingTaxes(operations, fromDate, horizonDays) {
     result.push(draft('tax', `Аванс по УСН (6%) и 1/3 НДС за квартал`, reduced * QUARTERLY_RATE, dt));
   }
 
-  // 3) Демо-минимум: если расчёт на 28-е текущего месяца < 150 000 → детерминированные 180 000
-  const nowDay = toUtcDay(new Date());
+  // 3) Демо-минимум: если расчёт на 28-е месяца опорной даты < 150 000 → детерминированные 180 000.
+  // ТЗ-доработка WP-7 §9: налоговый календарь привязан к asOf (fromDate), а не к new Date()
+  const nowDay = toUtcDay(fromDate);
   const nowDate = dayUtc(nowDay);
   const idx28 = toUtcDay(new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 28)));
   const on28 = result.filter((ev) => byDay(ev.expectedDate) === idx28).reduce((s, ev) => s + ev.amount, 0);

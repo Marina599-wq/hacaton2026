@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const CLIENT = path.resolve(import.meta.dirname, '..');
-const SERVER = 'C:/Users/Admin/hacaton2026-backend/server';
+const SERVER = path.resolve(import.meta.dirname, '..', '..', 'server');
 
 function read(p) {
   if (!existsSync(p)) throw new Error('missing: ' + p);

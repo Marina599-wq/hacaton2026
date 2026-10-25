@@ -314,7 +314,7 @@
 | мёртвые сервисы из WP-6 п. 11 | удалить |
 | `client/scripts/verify-*.mjs` | оставить, добавить `"verify": "…"` в `client/package.json` и упомянуть в README, либо удалить; решение фиксируется в коммите |
 
-7. **Игнорируемые файлы.** В `.gitignore` добавить `test-data/statements/`, `coverage/`, `*.local`. В репозитории не должно остаться абсолютных локальных путей (`C:/Users`, `/home/…`).
+7. **Игнорируемые файлы.** В `.gitignore` добавить `test-data/statements/`, `coverage/`, `*.local`. В репозитории не должно остаться абсолютных локальных путей (Windows-путь с диском C или `/home/…`).
 8. **Запрет `console` в серверном коде.** В `server/` добавить ESLint (dev-зависимость) с правилом `no-console: error`, исключение — только `src/utils/logger.js`. Скрипт `lint` корня запускает ESLint клиента и сервера.
 9. **Автоматическая проверка.** `.github/workflows/ci.yml`: на каждый push и pull request — установка, `npm test` сервера, `tsc`, `eslint` и `vite build` клиента.
 
@@ -322,7 +322,7 @@
 
 - Чистое клонирование в пустую папку, затем `npm run setup && npm run dev`: сервер на `5000`, клиент на `5173`, вход под демо-пользователем работает без ручной правки конфигов.
 - `npm test`, `npm run lint`, `npm run build` из корня завершаются с кодом 0.
-- `grep -rn "console\." server/src` находит только `logger.js`; `grep -rn "C:/Users" .` пусто.
+- `grep -rn "console\." server/src` находит только `logger.js`; grep по локальным абсолютным путям (Windows-путь с диском C) по репо пуст.
 - Диаграмма Mermaid корректно отображается на GitHub и содержит все блоки из таблицы п. 1.
 - `node server/scripts/check-contract.mjs` завершается с кодом 0.
 

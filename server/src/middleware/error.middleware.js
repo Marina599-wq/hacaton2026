@@ -44,7 +44,7 @@ function mapPrismaError(err) {
   }
 }
 
-export function errorHandler(err, req, res, next) {
+export function errorHandler(err, req, res, _next) {
   let status = 500;
   let code = 'INTERNAL';
   let message = 'Внутренняя ошибка сервера';

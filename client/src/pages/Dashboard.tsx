@@ -158,6 +158,27 @@ export default function Dashboard() {
               </span>
             </div>
           )}
+          {/* ТЗ-доработка WP-5 п.6: предупреждения сверки план-факт (в существующем списке на главной) */}
+          {Array.isArray(d.alerts) && d.alerts.length > 0 && (
+            <div className="space-y-2">
+              {d.alerts.map((a) => (
+                <div
+                  key={a.id}
+                  className={cn(
+                    'flex items-start gap-2 rounded-lg border p-3 text-xs',
+                    a.severity === 'critical'
+                      ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                  )}
+                >
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    <span className="font-semibold">{a.title}.</span> {a.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {/* ТЗ-доработка WP-7 §10: пустая выписка — пустое состояние с кнопкой загрузки */}
           {(d.dataQuality?.historyDays ?? 0) === 0 && (
             <Card>
@@ -355,8 +376,8 @@ export default function Dashboard() {
             {selfLoans.error && <p className="mt-3 text-xs text-rose-400">Не удалось загрузить самозаймы</p>}
           </Card>
 
-          {/* 6. План-факт (ТЗ-доработка WP-5) */}
-          <PlanFactCard />
+          {/* 6. План-факт (ТЗ-доработка WP-5): график + просроченные ожидания из alerts */}
+          <PlanFactCard alerts={d.alerts} />
 
           {/* 6.1. Демо-данные (ТЗ-доработка WP-7 §13) */}
           <DemoDataCard onLoaded={refreshAll} />

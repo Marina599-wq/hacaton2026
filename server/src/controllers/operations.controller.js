@@ -3,9 +3,9 @@ import { prisma } from '../config/db.js';
 import { anonymizeCounterparty } from '../utils/anonymizer.js';
 import { parseBankStatement, buildImportSummary } from '../utils/parser.js';
 import { categorize, resolveSubcategory, legacyForSub } from '../services/categorizer.service.js';
-import { analyzeStatement } from '../utils/dataQuality.js';
 import { maskName, maskInn } from '../utils/masking.js';
 import { ApiError } from '../utils/errors.js';
+import { planFactService } from '../services/planFact.service.js';
 
 /**
  * Обезличивание в ответах (WP-6 §10): контрагенты идут через maskName/maskInn.
@@ -124,6 +124,10 @@ export async function createOperation(req, res, next) {
       }
     });
 
+    // ТЗ-доработка WP-5: после добавления операции — сверка план-факт,
+    // чтобы следующий GET /dashboard уже содержал свежий прогноз и статусы
+    await planFactService.reconcileForUser(userId);
+
     res.status(201).json(maskOperation(operation));
   } catch (err) {
     next(err);
@@ -209,6 +213,9 @@ export async function importStatement(req, res, next) {
       rowErrors,
     });
 
+    // ТЗ-доработка WP-5: после импорта выписки — сверка план-факт
+    await planFactService.reconcileForUser(userId);
+
     res.status(201).json({
       ...summary,
       removed,
@@ -281,6 +288,9 @@ export async function bulkImport(req, res, next) {
     await prisma.operation.createMany({
       data: rows.map((r) => ({ ...r, createdAt: new Date(ts) })),
     });
+
+    // ТЗ-доработка WP-5: после пакетного импорта — сверка план-факт
+    await planFactService.reconcileForUser(userId);
 
     res.status(201).json({ imported: rows.length, asOf: rows[rows.length - 1].date.toISOString() });
   } catch (err) {

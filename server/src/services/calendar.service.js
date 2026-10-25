@@ -1,5 +1,6 @@
 import { prisma } from '../config/db.js';
 import { calculateForecast } from './forecast.service.js';
+import { getAsOfDate } from '../utils/asOf.js';
 
 /** Средние доход/расход по дню недели (сумма / кол-во вхождений). */
 function weekdayAverages(operations) {
@@ -37,6 +38,10 @@ export class CalendarService {
     const currentBalance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
     const minThreshold = user?.minBalance ?? 0;
 
+    // Опорная дата прогноза (ТЗ-доработка WP-7 §9): календарь строится от asOf, не от today
+    const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
+    const asOf = getAsOfDate(lastOpDate, new Date());
+
     const now = new Date();
     const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const [year, mon] = (month || defaultMonth).split('-').map(Number);
@@ -45,7 +50,9 @@ export class CalendarService {
 
     // Горизонт от сегодня до конца целевого месяца (минимум дефолтный).
     const horizonDays = Math.max(30, daysInMonth + 14);
-    const fc = calculateForecast(operations, risks, currentBalance, horizonDays, minThreshold);
+    const fc = calculateForecast(operations, risks, currentBalance, horizonDays, minThreshold, {
+      today: asOf, // ТЗ WP-7 §9: опорная дата во всех вызовах calculateForecast
+    });
     const pointByDate = new Map(fc.forecastSeries.map((p) => [p.date, p]));
     const dangerSet = new Set(fc.dangerDays);
     const goodSet = new Set(fc.goodDays);

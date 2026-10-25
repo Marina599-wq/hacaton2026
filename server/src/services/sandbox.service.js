@@ -46,9 +46,14 @@ export class SandboxService {
     const currentBalance = operations.length > 0 ? operations[operations.length - 1].balanceEndOfDay : 0;
     const minThreshold = user?.minBalance ?? 0;
 
-    // Опорная дата (ТЗ-доработка WP-7 §9): свежая выписка — сейчас, старая — последняя дата
+    // Опорная дата (ТЗ-доработка WP-7 §9): свежая выписка — сейчас, старая — последняя дата.
+    // FORECAST_AS_OF — только для демо-учётки (контракт demo@cashflow.ru); §10: MC отключается
+    // при истории < 14 дней.
+    const DEMO_EMAIL = 'demo@cashflow.ru';
     const lastOpDate = operations.length ? operations[operations.length - 1].date : null;
-    const asOf = env.FORECAST_AS_OF || getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
+    const asOf = user?.email === DEMO_EMAIL && env.FORECAST_AS_OF
+      ? env.FORECAST_AS_OF
+      : getAsOfDate(lastOpDate, new Date()) || new Date().toISOString().slice(0, 10);
     const historyDays = operations.length > 1 ? Math.round((lastOpDate - operations[0].date) / 86_400_000) + 1 : 0;
 
     const activeEvents = plannedEvents.filter((e) => e.active !== false && e.status !== 'paid');
@@ -60,7 +65,7 @@ export class SandboxService {
       return true;
     });
 
-    const fcOptions = { today: asOf, mcDisabled: historyDays <= 14 };
+    const fcOptions = { today: asOf, mcDisabled: historyDays < 14 };
     const baseFc = calculateForecast(operations, risks, currentBalance, HORIZON_DAYS, minThreshold, {
       ...fcOptions,
       plannedEvents: activeEvents,

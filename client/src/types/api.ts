@@ -173,6 +173,8 @@ export interface DashboardResponse {
   horizon: number;
   /** Условная ставка банковского займа, % (фиксированная константа из конфига, ТЗ §5.7). Опционально. */
   loanRatePct?: number;
+  asOf?: string; // ТЗ-доработка WP-7 §9: опорная дата прогноза (top-level)
+  meta?: { computed?: 'full' | 'incremental'; computedMs?: number }; // ТЗ-доработка WP-8 п.7: видимость расчёта
   summary: {
     income: number;
     expense: number;
@@ -185,6 +187,19 @@ export interface DashboardResponse {
   alreadyBelowThreshold?: boolean;
   dangerDays: string[];
   goodDays: string[];
+  /** ТЗ-доработка WP-5 п.6: предупреждения сверки план-факт (planned_overdue / regular_missing / gap_forecast). */
+  alerts?: DashboardAlert[];
+}
+
+// ТЗ-доработка WP-5: предупреждения на главной
+export interface DashboardAlert {
+  id: string;
+  type: 'planned_overdue' | 'regular_missing' | 'gap_forecast';
+  severity: 'warning' | 'critical';
+  title: string;
+  message: string;
+  date: string;
+  amount: number | null;
 }
 
 export interface Paged<T> {
@@ -323,6 +338,29 @@ export interface CategoriesResponse {
 }
 
 /** Вкладка «План-факт» (ТЗ-доработка WP-5). */
+export interface PlanFactPeriod {
+  from: string;
+  to: string;
+  planIn: number;
+  planOut: number;
+  factIn: number;
+  factOut: number;
+  planNet: number;
+  factNet: number;
+  deviationNet: number;
+  significant: boolean;
+}
+
+// ТЗ-доработка WP-5: GET /plan-fact?days=30|60|90&granularity=day|week
+export interface PlanFactPeriodsResponse {
+  days: number;
+  granularity: 'day' | 'week';
+  cut: string;
+  base: string;
+  periods: PlanFactPeriod[];
+}
+
+/** Legacy-вкладка «План-факт» по месяцам (GET /dashboard/plan-fact). */
 export interface PlanFactGroup {
   key: string;
   label: string;
@@ -390,4 +428,73 @@ export interface BankLoanResponse {
   /** Условная ставка — константа из конфига бэкенда */
   ratePct: number;
   operation: Operation;
+}
+
+/* ------------------------------ ТЗ-доработка WP-4: негативные сценарии «что если» ------------------------------ */
+
+export type ScenarioType = 'client_delay' | 'revenue_drop' | 'unplanned_expense' | 'fixed_costs_growth';
+
+export interface ScenarioItem {
+  type: ScenarioType;
+  params: {
+    inn?: string;
+    days?: number;
+    percent?: number;
+    fromDate?: string | null;
+    durationDays?: number | null;
+    amount?: number;
+    date?: string | null;
+  };
+}
+
+export interface ScenarioSimulateRequest {
+  /** 1–4 сценария, типы не повторяются */
+  scenarios: ScenarioItem[];
+  /** Горизонт — как у главного прогноза (30/60/90) */
+  horizonDays?: number;
+}
+
+export interface ScenarioSeriesPoint {
+  date: string;
+  balance: number;
+  p10: number | null;
+  p90: number | null;
+}
+
+export interface ScenarioContract {
+  threshold: number;
+  series: ScenarioSeriesPoint[];
+  gapDate: string | null;
+  gapAmount: number;
+  gapProbabilityPct: number;
+  minBalance: number | null;
+  dangerDays: string[];
+}
+
+export interface ScenarioSimulateResponse {
+  base: ScenarioContract;
+  /** Все выбранные сценарии вместе */
+  scenario: ScenarioContract;
+  /** Каждый тип отдельно */
+  isolated: ScenarioContract[];
+  delta: {
+    gapDateShiftDays: number;
+    gapAmount: number;
+    gapProbabilityPct: number;
+    minBalance: number;
+  };
+  asOf: string;
+  scenarios: ScenarioItem[];
+}
+
+export interface ScenarioClient {
+  inn: string;
+  name: string;
+  totalIn6m: number;
+  sharePct: number;
+}
+
+export interface ScenarioClientsResponse {
+  clients: ScenarioClient[];
+  windowMonths: number;
 }

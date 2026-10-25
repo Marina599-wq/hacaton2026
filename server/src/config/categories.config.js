@@ -1,151 +1,126 @@
 /**
- * ТЗ-доработка WP-3: каталог подкатегорий и правила категоризации.
+ * ТЗ-доработка WP-3 §4: каталог подкатегорий и правила категоризации.
  *
- * Таксономия (17 слогов, слог = каталог, не «договорённость между модулями»):
- *   in  (8): revenue_clients, revenue_acquiring, revenue_marketplace, loan_in,
- *            own_funds_in, refund_in, other_in, unknown
- *   out (9): salary, tax, rent, loan_payment, bank_fee, suppliers,
- *            own_funds_out, refund_out, other_out
- * Итого 8 + 9 = 17.
- *
- * `legacy` — свёртка в 4 legacy-категории интерфейса (income/expense/transfer/refund):
- *   income ← все in, кроме own_funds_in (transfer) и refund_in (refund);
- *   expense ← все out, кроме own_funds_out (transfer) и refund_out (refund);
- *   own_funds_in/out ← transfer;  refund_in/out ← refund;  unknown → legacy по direction.
+ * Таксономия — 17 категорий (таблица §4): 7 in + 9 out + unknown (in/out).
+ * `legacy` — устаревшая `category` (интерфейс и фильтрация), значения:
+ *   income / expense / payment / tax / salary / other.
  */
 
 export const SUBCATEGORIES = [
-  { id: 'revenue_clients', direction: 'in', legacy: 'income', label: 'Выручка: клиенты' },
-  { id: 'revenue_acquiring', direction: 'in', legacy: 'income', label: 'Выручка: эквайринг' },
-  { id: 'revenue_marketplace', direction: 'in', legacy: 'income', label: 'Выручка: маркетплейс' },
-  { id: 'loan_in', direction: 'in', legacy: 'income', label: 'Полученный займ' },
-  { id: 'own_funds_in', direction: 'in', legacy: 'income', label: 'Свои средства: внесение' },
-  { id: 'refund_in', direction: 'in', legacy: 'income', label: 'Возврат (входящий)' },
+  { id: 'revenue_clients', direction: 'in', legacy: 'income', label: 'Оплата от клиентов' },
+  { id: 'revenue_acquiring', direction: 'in', legacy: 'income', label: 'Эквайринг' },
+  { id: 'revenue_marketplace', direction: 'in', legacy: 'income', label: 'Выплаты маркетплейсов' },
+  { id: 'loan_in', direction: 'in', legacy: 'income', label: 'Кредиты и займы полученные' },
+  { id: 'own_funds_in', direction: 'in', legacy: 'income', label: 'Перевод своих средств (приход)' },
+  { id: 'refund_in', direction: 'in', legacy: 'income', label: 'Возврат платежа (приход)' },
   { id: 'other_in', direction: 'in', legacy: 'income', label: 'Прочие поступления' },
-  { id: 'unknown', direction: 'in', legacy: 'income', label: 'Неизвестно' },
-  { id: 'salary', direction: 'out', legacy: 'salary', label: 'Зарплата' },
-  { id: 'tax', direction: 'out', legacy: 'tax', label: 'Налоги' },
+  { id: 'salary', direction: 'out', legacy: 'salary', label: 'Зарплата и выплаты сотрудникам' },
+  { id: 'tax', direction: 'out', legacy: 'tax', label: 'Налоги и взносы (в т. ч. ЕНП)' },
   { id: 'rent', direction: 'out', legacy: 'payment', label: 'Аренда' },
-  { id: 'loan_payment', direction: 'out', legacy: 'payment', label: 'Платёж по займу' },
-  { id: 'bank_fee', direction: 'out', legacy: 'payment', label: 'Комиссия банка' },
-  { id: 'suppliers', direction: 'out', legacy: 'expense', label: 'Поставщики' },
-  { id: 'own_funds_out', direction: 'out', legacy: 'expense', label: 'Свои средства: вывод' },
-  { id: 'refund_out', direction: 'out', legacy: 'expense', label: 'Возврат (исходящий)' },
-  { id: 'other_out', direction: 'out', legacy: 'expense', label: 'Прочие списания' },
+  { id: 'loan_payment', direction: 'out', legacy: 'payment', label: 'Кредиты и лизинг' },
+  { id: 'bank_fee', direction: 'out', legacy: 'payment', label: 'Комиссии банка' },
+  { id: 'suppliers', direction: 'out', legacy: 'expense', label: 'Поставщики и закупки' },
+  { id: 'own_funds_out', direction: 'out', legacy: 'other', label: 'Перевод своих средств (расход)' },
+  { id: 'refund_out', direction: 'out', legacy: 'expense', label: 'Возврат платежа (расход)' },
+  { id: 'other_out', direction: 'out', legacy: 'expense', label: 'Прочие расходы' },
+  { id: 'unknown', direction: 'in', legacy: 'income', label: 'Не определено' }, // in/out: legacy по направлению
 ];
 
 export const SUBCATEGORY_BY_ID = Object.fromEntries(SUBCATEGORIES.map((s) => [s.id, s]));
 
 export function legacyForSub(subcategory, direction) {
   const s = SUBCATEGORY_BY_ID[subcategory];
+  if (s && subcategory === 'unknown') return direction === 'in' ? 'income' : 'expense';
   if (s) return s.legacy;
   return direction === 'in' ? 'income' : 'expense';
 }
 
-/** Инн контрагента → legacy / direction-нейтральный slug unknown. */
 export const UNKNOWN_SUB = 'unknown';
 
-// ── Правила (порядок = приоритет; ID правила — для аудита) ──────────────────
-// TZ §2.4: порядок 1) возвраты, 2) налоги, 3) зарплата, 4) свои средства,
-// 5) займы, 6) поставщики, 7) эквайринг/маркетплейс, 8) комиссии, 9) аренда,
-// 10) выручка от юрлиц, 11) эвристика по ИНН, 12) unknown.
+// ── Правила: порядок = приоритет (§4 п.3), id вида «R-<slug>-01» (§4 п.3) ──
+// Конфиденс (§4 п.4): ключевое слово — 0.9; правило по ИНН — 0.6; без совпадений — 0.
+export const KEYWORD_CONFIDENCE = 0.9;
+export const INN_RULE_CONFIDENCE = 0.6;
+export const UNKNOWN_CONFIDENCE = 0;
+
 export const RULES = [
   {
-    id: 'refund',
-    subcategory: (dir) => (dir === 'in' ? 'refund_in' : 'refund_out'),
-    regex: /(возврат|вернул\s+средств|возврат\s+средств|перенаправлен\s+в\s+счёт\s+клиента)/i,
-    confidence: 0.9,
-    note: 'Слово «возврат» в назначении; поступление в течение 24 часов после refund_in тем же контрагентом — refund_out (p.2.2)',
-  },
-  {
-    id: 'tax',
-    subcategory: () => 'tax',
-    regex: /(налог|налоги|сб\s+в\s+бюджет|единый\s+налог(?:овый)?\s+плате?ж|\bнп\b|успн|внп|аванс\s+по\s+налог|фсфр|сбор(?:а)?\s+по\s+налог|платёж\s+в\s+фнс)/i,
-    confidence: 0.95,
-    note: 'Номер ТИН, период (месяц/квартал) или упоминание «налог»; «перевод на 30 дней» — НЕ налог',
-  },
-  {
-    id: 'salary',
-    subcategory: () => 'salary',
-    regex: /(зарплат(?:а|ные)|з\/п\b|\bсп\b.*работ|работника|аванс\s+(?:по|зарплат)|выплата\s+по\s+смете|расчёт\s+с\s+работни)/i,
-    confidence: 0.95,
-  },
-  {
-    id: 'own_funds',
+    // §4 п.3: «переводы своих средств» — первый приоритет (поп. §4 п.2: текст «перевод собственных/своих средств»,
+    // либо ИНН контрагента = ИНН владельца выписки)
+    id: 'R-own_funds-01',
     subcategory: (dir) => (dir === 'in' ? 'own_funds_in' : 'own_funds_out'),
-    regex: null, // только эвристика: ИНН контрагента = ИНН владельца
-    confidence: 0.95,
-    note: 'ИНН контрагента совпадает с ИНН владельца (ctx.userInn)',
+    regex: /перевод\s+(?:собственных|своих)\s+средств|между\s+(?:своими|собственными)\s+(?:счёт|счет|карт)|пополнение\s+своего|внесение\s+(?:в|на)\s+сво/i,
+    note: 'ИНН-вариант (ctx.userInn) обрабатывается в служе (свой ИНН = ИНН контрагента)',
   },
   {
-    id: 'loan',
+    id: 'R-refund-01',
+    subcategory: (dir) => (dir === 'in' ? 'refund_in' : 'refund_out'),
+    regex: /возврат|возврат\s+средств|вернул\s+средств|отмен(?:а|ен)\s+(?:платеж|оплаты)|спор\s+по\s+оплат|перенаправлен\s+в\s+счёт\s+клиента/i,
+    note: 'П.2.2: поступление в 24 ч после refund_in тем же контрагентом остаётся refund_out',
+  },
+  {
+    id: 'R-tax-01',
+    subcategory: () => 'tax',
+    regex: /налог|налоги|сб\s+в\s+бюджет|едины(?:й|е)\s+налог(?:овый)?\s+плате?ж|\bнп\b|успн|внп|фсфр|сбор(?:а)?\s+по\s+налог|платёж\s+в\s+фнс|страхов(?:ы?е)?\s+взнос|пфр\b|фрс\b/i,
+    note: 'ТИН, период, «налог», ЕНП/НП, НДС, страховые взносы; «перевод на 30 дней» — НЕ налог',
+  },
+  {
+    id: 'R-salary-01',
+    subcategory: () => 'salary',
+    regex: /зарплат|заработн|аванс\s+работни|реестр\s+(?:работн|зарплат)|работника|сотрудни|выплач\s+по\s+смете|расчёт\s+с\s+работни/i,
+  },
+  {
+    id: 'R-loan-01',
     subcategory: (dir) => (dir === 'in' ? 'loan_in' : 'loan_payment'),
-    regex: /займ(?:а|ов)?|по(?:гашени|гашение)\s+(?:с)займ|(?:выплат|платеж(?:а)?|по)\s+по\s+займ|кредит(?:н)?ы?й\s+договор|по\s+(?:кредит|договору)\s+кредит/i,
-    confidence: 0.9,
-    note: 'loan_in — «займ средств, предоставленный…»; loan_payment — погашение/выплата по договору займа',
+    regex: /займ|кредит|лизи(?:н|нга)|погашени(?:е|я)\s+кредит|процент(?:а)?\s+по\s+(?:кредит|займ)/i,
+    note: 'loan_in — «займ средств, предоставленный…»; loan_payment — погашение/выплата по договору',
   },
   {
-    id: 'supplier',
-    subcategory: () => 'suppliers',
-    regex: /постав(ш|л)|поставщ|закуп|компл(?:емен|ект)\s+товар|оплат(?:а)?\s+(?:товар|услуг|работ)\s+пост/i,
-    confidence: 0.8,
-  },
-  {
-    id: 'acquiring',
-    subcategory: () => 'revenue_acquiring',
-    regex: /эквайринг|merch|merchant|клиринг|офис\-магистраль|элетрон\+|электрон(?:ный)?\s*\+|офис\s*магистраль/i,
-    confidence: 0.9,
-  },
-  {
-    id: 'marketplace',
-    subcategory: () => 'revenue_marketplace',
-    regex: /маркетплейс|marketplace|авито|avito|озон|wild\s*berries|ярдена|бербер/i,
-    confidence: 0.9,
-  },
-  {
-    id: 'bank_fee',
-    subcategory: () => 'bank_fee',
-    regex: /комисси(?:я|и)\s+(?:за\s+)?(?:о|обслуж)|обслуживание\s+счёта|платеж(?:ное)\s+обслуживание/i,
-    confidence: 0.9,
-  },
-  {
-    id: 'rent',
+    id: 'R-rent-01',
     subcategory: () => 'rent',
-    regex: /аренд(?:а|ное|ные)/i,
-    confidence: 0.8,
+    regex: /аренд(?:а|ы|у)|наём|найм\s+(?:помещен|офис|имущ)|содержание\s+помещ/i,
   },
   {
-    id: 'revenue_clients',
-    subcategory: () => 'revenue_clients',
-    regex: /договор|акт|счёт(?:а)?\s+на\s+оплату|заказ(?:а)?\s+на\s+работы|оплат(?:а)?\s+по\s+(?:договор|смете|заявк)|поступ(?:ление|ив)ла?\s+заказ|за\s+(?:товар|услуг|работ)/i,
-    confidence: 0.85,
+    id: 'R-bank_fee-01',
+    subcategory: () => 'bank_fee',
+    regex: /комисси|обслуживани(?:е|я)\s+(?:сч|карт|пласт|платеж)|ведени(?:е|я)\s+(?:сч|карт|счет)/i,
   },
   {
-    id: 'inn_heuristic',
+    id: 'R-acquiring-01',
+    subcategory: () => 'revenue_acquiring',
+    regex: /эквайринг|merch(?:ant)?|клиринг|офис\??\s?магистраль|электрон(?:ный)?\s?\+/i,
+  },
+  {
+    id: 'R-marketplace-01',
+    subcategory: () => 'revenue_marketplace',
+    regex: /маркетплейс|marketplace|авито|avito|озон|wild\s?berries/i,
+  },
+  {
+    id: 'R-supplier-01',
+    subcategory: () => 'suppliers',
+    regex: /постав(ш|л)|поставщ|закуп|компл(?:емен|ект)\s+товар|пополнени(?:е|я)\s+(?:расчетн|лицев|карт)|топлив|гсм\b|заправк|провоз|про(?:езд|езд)|услуг(?:и|а)?\s+связ|интернет|бухгалтер|уборк|запчаст|шиномонтаж|шины|лицев(?:ым|ого)\s+сч|расчетн(?:ой|ого)\s+запис|софт|подписк|оплат(?:а|у)?\s+(?:за|по)\s+(?:услуг|груз|перевозк|ремон|канц|шины|шин|софт|подписк|по\s+счет|по\s+смете|по\s+договор|по\s+заявк|счёту)/i,
+    note: 'Закупки и оплата услуг/товаров (связь, ПО, ремонт, топливо, провоз)',
+  },
+  {
+    id: 'R-client-01',
     subcategory: () => 'revenue_clients',
-    regex: null, // 2+ поступления с одним ИНН за последние 90 дней, контрагенты различаются (p.2.4)
-    confidence: 0.75,
+    regex: /договор|акт\s+\w*№?|счёт\w*\s+(?:на\s+оплату|№)|упд|заказ(?:а)?\s+на\s+работы|оплат(?:а|у)?\s+по\s+(?:договор|смете|заявк|счет|счёту|упд|акт)|поступ(?:ление|ив)|за\s+(?:товар|услуг|работ|продал)/i,
+    note: 'Выручка от юрлиц: УПД/счёт/акт/договор/«оплата по…»',
+  },
+  {
+    id: 'R-inn-01',
+    subcategory: null, // заполняется динамически из §4 п.5 (ИНН-правило)
+    regex: null,
+    confidence: INN_RULE_CONFIDENCE,
   },
 ];
 
-// Платежи 99-й серии, «налог» — налоги
-const NALOG_SERIES = /99/; // серия кода ОКТМД 99
-
-export const TAX_PATTERNS = {
-  tinn: /\b([а-яё]{2})(\d{4})\b/i, // ТИН: 2 буквы + 4 цифры (КЗ)
-  period: /за\s+(?:январ|феврал|март|апрел|ма[йй]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*|за\s+\d\s+(?:квартал|мес)/i,
-  enp: /единый\s+налог(?:овый)?\s+плате?ж|\bнп\b|успн|внп/i,
-  vat: /\sндс\b|налог\s+на\s+добавленн/i,
+// §4 п.5: правило по ИНН контрагента
+export const INN_RULE = {
+  minOccurrences: 3, // контрагент в выписке ≥ 3 раз
+  minLabeledShare: 0.8, // ≥ 80 % размеченных операций (confidence ≥ 0.9) — одна категория
+  labeledConfidence: KEYWORD_CONFIDENCE,
 };
 
-export const OWN_FUNDS_PATTERN = /перевод\s+(?:собственных|своих)\s+средств|между\s+(?:своими|собственными)\s+счётами/i;
+export const OWN_FUNDS_PATTERN = /перевод\s+(?:собственных|своих)\s+средств|между\s+(?:своими|собственными)\s+(?:счёт|счет|карт)/i;
 
-/** Эвристика ИНН (p.2.4): 2+ поступления с одним ИНН за последние 90 дней. */
-export const INN_HEURISTIC = { lookbackDays: 90, minRepetitions: 2 };
-
-/** Доверие по правилам (0..1), п.2.3: «каждая операция получает одну из 17 категорий
- *  с доверием и источником правила» — `rule` в ответе = id правила. */
-export const RULE_CONFIDENCE = Object.fromEntries(
-  RULES.map((r) => [r.id, r.confidence ?? 0.5]),
-);
-export const UNKNOWN_CONFIDENCE = 0.2;

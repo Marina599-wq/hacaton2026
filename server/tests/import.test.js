@@ -84,7 +84,7 @@ describe('Parser — XLSX: ИНН строкой и числом (ТЗ WP-7 §4)
 
 // ---------- HTTP: импорта и регистрация на живом app ----------
 
-let app, server, base, token, userId;
+let app, server, base, token;
 const uniq = (p) => `${p}-${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
 
 async function jsonPost(p, body, headers = {}) {
@@ -130,7 +130,6 @@ describe('HTTP импорта (ТЗ WP-7 §4, §5)', () => {
     });
     expect(reg.status).toBe(201);
     token = reg.body.token;
-    userId = reg.body.user.id;
     globalThis.__importPrisma = prisma;
   });
 

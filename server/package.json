@@ -8,6 +8,7 @@
     "prisma:push": "prisma db push",
     "seed": "node prisma/seed/index.js",
     "test": "vitest run",
+    "lint": "eslint .",
     "backtest": "node scripts/backtest.mjs"
   },
   "dependencies": {
@@ -25,6 +26,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
     "prisma": "^5.19.0",
     "vitest": "^2.0.5"
   }

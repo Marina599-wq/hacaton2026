@@ -90,6 +90,10 @@ model PlannedEvent {
   status           String   @default("pending")
   active           Boolean  @default(true)
   createdAt        DateTime @default(now())
+  // ТЗ-доработка WP-5: сверка план-факт (paid / partial / paid_late)
+  paidAmount       Float    @default(0)
+  factOperationId  String?
+  deviationDays    Int?
 
   @@index([userId, expectedDate])
 }
@@ -103,4 +107,7 @@ model SandboxScenario {
   date      DateTime
   repeats   Int      @default(1)
   createdAt DateTime @default(now())
+  // ТЗ-доработка WP-4: тип сценария — legacy синтетические операции / 4 негативных типа
+  kind     String  @default("custom_event")
+  params   String? // JSON-параметры негативного сценария (WP-4)
 }

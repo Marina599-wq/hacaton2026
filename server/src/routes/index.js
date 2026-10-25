@@ -15,6 +15,8 @@ import integrationsRoutes from './integrations.routes.js';
 import counterpartyRoutes from './counterparty.routes.js';
 import categoriesRoutes from './categories.routes.js';
 import demoRoutes from './demo.routes.js';
+import scenariosRoutes from './scenarios.routes.js'; // ТЗ-доработка WP-4: негативные сценарии
+import planFactRoutes from './planFact.routes.js'; // ТЗ-доработка WP-5: график «План-факт»
 
 const router = Router();
 
@@ -34,5 +36,7 @@ router.use('/user', userRoutes);
 router.use('/planned-events', plannedEventsRoutes);
 router.use('/integrations', integrationsRoutes);
 router.use('/counterparty', counterpartyRoutes);
+router.use('/scenarios', scenariosRoutes); // ТЗ-доработка WP-4
+router.use('/plan-fact', planFactRoutes); // ТЗ-доработка WP-5: график «План-факт»
 
 export default router;

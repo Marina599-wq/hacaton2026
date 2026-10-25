@@ -1,4 +1,5 @@
 import { bankService, BankValidationError } from '../services/bank.service.js';
+import { planFactService } from '../services/planFact.service.js';
 import { ApiError } from '../utils/errors.js';
 
 function run(handler) {
@@ -42,7 +43,11 @@ export class BankController {
   /** GET /bank/transactions?from=YYYY-MM-DD&to=YYYY-MM-DD — выписка по счёту. */
   transactions = run(async (userId, req, res) => {
     const { from, to } = req.query;
-    res.json(await bankService.transactions(userId, from, to));
+    const data = await bankService.transactions(userId, from, to);
+    // ТЗ-доработка WP-5: после чтения выписки банка — сверка план-факт
+    // (операции могут появиться — статусы плановых событий обновляются к следующему GET /dashboard)
+    await planFactService.reconcileForUser(userId);
+    res.json(data);
   });
 }
 
