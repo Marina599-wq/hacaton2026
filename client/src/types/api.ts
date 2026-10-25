@@ -8,9 +8,16 @@ export type Direction = 'in' | 'out';
 export type OperationCategory = 'income' | 'expense' | 'payment' | 'tax' | 'salary' | 'other';
 export type OperationSource = 'import' | 'manual' | 'bank_stub' | 'self_loan' | 'bank_loan' | 'payment';
 export type Subcategory =
-  | 'salary' | 'tax' | 'rent' | 'loan' | 'insur' | 'supp'
-  | 'self_loan' | 'bank_loan' | 'payment' | 'expense' | 'income' | 'refund_in' | 'refund_out';
-export type CategoryConfidence = 'high' | 'medium' | 'low' | 'manual' | 'unclassified';
+  | 'own_funds_in' | 'own_funds_out'
+  | 'refund_in' | 'refund_out'
+  | 'tax' | 'salary' | 'loan_payment' | 'lease'
+  | 'rent' | 'bank_fee' | 'acquiring'
+  | 'marketplace' | 'suppliers' | 'revenue_clients'
+  | 'other_in' | 'other_out'
+  | 'unknown';
+
+/** Категоризация (ТЗ-доработка §2.1): источник — 'rule' (авто) или 'manual' (рука). */
+export type CategorySource = 'rule' | 'manual';
 
 export interface Operation {
   id: string;
@@ -19,7 +26,8 @@ export interface Operation {
   direction: Direction;
   category: OperationCategory;
   subcategory?: Subcategory | null; // ТЗ-доработка WP-3; null — не категоризовано
-  confidence?: CategoryConfidence;
+  categoryConfidence?: number | null; // 0 / 0.6 (ИНН-правило) / 0.9 (ключевое слово)
+  categorySource?: CategorySource; // 'rule' — авто, 'manual' — назначено пользователем
   counterpartyName: string; // обезличено: первые 2 символа + ***
   counterpartyInn: string; // обезличено: 77******12
   purpose: string;
@@ -119,6 +127,22 @@ export interface IntegrationSyncResult {
   created: number;
 }
 
+/** Качество выписки (ТЗ-доработка WP-7 §7, §10). */
+export type DataQualityLevel = 'insufficient' | 'low' | 'medium' | 'high';
+
+export interface DashboardDataQuality {
+  level: DataQualityLevel;
+  historyDays?: number;
+  gapsDays?: number;
+  gaps?: Array<{ from: string; to: string; missingNet: number }>;
+  emptyInnRows?: number;
+  emptyPurposeRows?: number;
+  overdraftDays?: number;
+  warnings: string[];
+  /** Опорная дата прогноза (ТЗ WP-7 §9): сейчас или последняя дата выписки. */
+  asOf?: string;
+}
+
 export interface ForecastPoint {
   date: string;
   income: number;
@@ -129,8 +153,11 @@ export interface ForecastPoint {
 export interface ForecastResult {
   series: ForecastPoint[];
   gapDate: string | null;
-  gapProbabilityPct: number; // 0..100
+  /** 0..100; null — история < 14 дней, Монте-Карло не запускался (ТЗ WP-7 §9/§10). */
+  gapProbabilityPct: number | null;
   gapAmount: number;
+  /** ТЗ WP-7 §11: остаток на опорной дате уже ниже порога T — разрыв «сейчас». */
+  alreadyBelowThreshold?: boolean;
   /** Дни, где остаток ниже порога (красные зоны на графиках) */
   dangerDays?: string[];
   /** Порог T, по которому считаются dangerDays */
@@ -152,6 +179,10 @@ export interface DashboardResponse {
     balanceChange: number;
   };
   forecast: ForecastResult;
+  /** Качество выписки + опорная дата прогноза (ТЗ-доработка WP-7 §9/§10). */
+  dataQuality?: DashboardDataQuality;
+  /** ТЗ WP-7 §11: порог нарушен уже на опорной дате. */
+  alreadyBelowThreshold?: boolean;
   dangerDays: string[];
   goodDays: string[];
 }
@@ -183,6 +214,8 @@ export interface User {
 export interface AuthResponse {
   token: string;
   user: User;
+  /** ТЗ-доработка WP-7 §5: итог импорта при регистрации с выпиской (или демо-данными). */
+  import?: ImportSummary;
 }
 
 export interface CreateOperationRequest {
@@ -202,8 +235,29 @@ export interface ImportSummary {
   skipped: number;
   duplicatesRemoved: number;
   possibleDuplicates: number;
+  /** Первые 50 с номерами строк: «Строка 12: …» (ТЗ §4, §5). */
   warnings: string[];
-  dataQuality: Record<string, unknown>;
+  dataQuality: {
+    level: DataQualityLevel;
+    historyDays: number;
+    warnings: string[];
+    gaps?: Array<{ from: string; to: string; missingNet: number }>;
+  };
+}
+
+/** Демо-выписки (ТЗ-доработка WP-7 §13). */
+export interface DemoFile {
+  file: string;
+  label: string;
+}
+
+export interface DemoLoadResponse {
+  file: string;
+  operationsImported: number;
+  /** Сколько демо-операций (source='demo') заменено. */
+  replaced: number;
+  asOf: string;
+  rowErrors: number;
 }
 
 export interface SupportTicket {
@@ -251,12 +305,16 @@ export interface SubcategoryInfo {
   id: Subcategory;
   label: string;
   direction: Direction;
+  /** Legacy-категория (income/expense/...), в которую маппится подкатегория. */
+  legacy?: OperationCategory;
 }
 
 export interface CategoryInfo {
-  id: OperationCategory | 'unclassified';
+  id: OperationCategory | 'uncategorized' | 'unknown';
   label: string;
   subcategoryIds: Subcategory[];
+  /** Подписи подкатегорий для этого legacy-категория (slug → label). */
+  subcategoryLabels?: Record<string, string>;
 }
 
 export interface CategoriesResponse {

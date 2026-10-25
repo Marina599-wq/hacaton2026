@@ -149,8 +149,8 @@ export default function Sandbox() {
                 </tr>
                 <tr>
                   <td className="py-2 pr-4 text-slate-400 sm:pr-6">Вероятность разрыва</td>
-                  <td className="whitespace-nowrap pr-4 sm:pr-6">{Math.round(result.base.gapProbabilityPct)}%</td>
-                  <td className="whitespace-nowrap pr-4 sm:pr-6">{Math.round(result.scenario.gapProbabilityPct)}%</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{result.base.gapProbabilityPct != null ? `${Math.round(result.base.gapProbabilityPct)}%` : '—'}</td>
+                  <td className="whitespace-nowrap pr-4 sm:pr-6">{result.scenario.gapProbabilityPct != null ? `${Math.round(result.scenario.gapProbabilityPct)}%` : '—'}</td>
                   <td
                     className={cn(
                       'font-medium',

@@ -14,6 +14,8 @@ import type {
   CreateTicketRequest,
   CounterpartyCheckResult,
   DashboardResponse,
+  DemoFile,
+  DemoLoadResponse,
   CalendarResponse,
   HistoryCategory,
   HistorySummary,
@@ -43,15 +45,30 @@ function qs(params: Record<string, string | number | undefined> | null | undefin
   return `?${new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()}`;
 }
 
-/** Русские подписи категорий для нормализации бэкенд-сводки (бэк отдаёт категории как ключи). */
-const HISTORY_CATEGORY_LABELS: Record<string, string> = {
-  income: 'Доход',
-  expense: 'Расход',
-  payment: 'Платёж',
-  tax: 'Налоги',
-  salary: 'Зарплата',
-  other: 'Прочее',
+/** Русские подписи подкатегорий для круговой диаграммы «Истории» (таксономия TZ §4). */
+const HISTORY_SUBCATEGORY_LABELS: Record<string, string> = {
+  revenue_clients: 'Оплата от клиентов',
+  revenue_acquiring: 'Эквайринг',
+  revenue_marketplace: 'Выплаты маркетплейсов',
+  loan_in: 'Кредиты и займы полученные',
+  own_funds_in: 'Перевод своих средств (приход)',
+  refund_in: 'Возврат платежа (приход)',
+  other_in: 'Прочие поступления',
+  salary: 'Зарплата и выплаты сотрудникам',
+  tax: 'Налоги и взносы',
+  rent: 'Аренда',
+  loan_payment: 'Кредиты и лизинг',
+  bank_fee: 'Комиссии банка',
+  suppliers: 'Поставщики и закупки',
+  own_funds_out: 'Перевод своих средств (расход)',
+  refund_out: 'Возврат платежа (расход)',
+  other_out: 'Прочие расходы',
+  unknown: 'Не определено',
+  uncategorized: 'Не категоризовано',
 };
+
+/** Подпись подкатегории (для списков операций). */
+export const subcategoryLabel = (key: string): string => HISTORY_SUBCATEGORY_LABELS[key] ?? key;
 
 export const api = {
   auth: {
@@ -95,9 +112,16 @@ export const api = {
       forecast: {
         series,
         gapDate: (d.gapDate ?? fc.gapDate ?? null) as string | null,
-        gapProbabilityPct: Number(d.gapProbabilityPct ?? fc.gapProbabilityPct ?? 0),
+        // ТЗ WP-7 §9/§10: null — Монте-Карло не запускался (история ≤ 14 дней), не 0
+        gapProbabilityPct: (d.gapProbabilityPct ?? fc.gapProbabilityPct ?? null) as number | null,
         gapAmount: Number(d.gapAmount ?? fc.gapAmount ?? 0),
+        // ТЗ WP-7 §11
+        alreadyBelowThreshold: d.alreadyBelowThreshold === true || undefined,
       },
+      // ТЗ WP-7 §9/§10: качество выписки и опорная дата (баннер «Данные выписки на …»)
+      dataQuality: d.dataQuality as DashboardResponse['dataQuality'],
+      // ТЗ WP-7 §11
+      alreadyBelowThreshold: d.alreadyBelowThreshold === true || undefined,
       dangerDays: (Array.isArray(d.dangerDays) ? d.dangerDays : []) as string[],
       goodDays: (Array.isArray(d.goodDays) ? d.goodDays : []) as string[],
     };
@@ -123,6 +147,9 @@ export const api = {
     /** Перекатегоризация (ТЗ-доработка §2.3): subcategory='' — сброс; без operationIds — все операции пользователя. */
     reassign: (body: { subcategory: Subcategory | ''; operationIds?: string[] }) =>
       http.post<{ updated: number }>('/operations/reassign', body),
+    /** ТЗ-доработка §2.3: ручная перекатегоризация одной операции (PATCH /:id). */
+    patchOperation: (id: string, body: { subcategory: Subcategory | '' }) =>
+      http.patch<Operation>(`/operations/${id}`, body),
     /** Пакетный импорт операций (ТЗ-доработка WP-7). */
     bulk: (body: { operations: Array<Record<string, unknown>> }) =>
       http.post<{ imported: number; asOf: string }>('/operations/bulk', body),
@@ -130,6 +157,8 @@ export const api = {
   history: {
     // Бэк отдаёт { items: Operation[] } (без month/groups/total) — собираем сводку сами;
     // контрактная форма {month,total,groups} проходит как есть.
+    // ТЗ-доработка §10 (WP-3): диаграмма группируется по subcategory;
+    // null/пустая subcategory учитывается отдельно как «Не категоризовано».
     summary: async (q: { month: string; category?: HistoryCategory | string }): Promise<HistorySummary> => {
       const raw = await http.get<HistorySummary | { items?: Operation[] }>(
         `/history/summary${qs({ month: q.month, category: q.category || undefined })}`,
@@ -138,10 +167,13 @@ export const api = {
       const ops = (raw as { items?: Operation[] } | undefined)?.items ?? [];
       const inMonth = ops.filter((o) => o.date && o.date.slice(0, 7) === q.month);
       const byCat = new Map<string, number>();
-      inMonth.forEach((o) => byCat.set(o.category, (byCat.get(o.category) ?? 0) + o.amount));
+      inMonth.forEach((o) => {
+        const key = o.subcategory || 'uncategorized';
+        byCat.set(key, (byCat.get(key) ?? 0) + o.amount);
+      });
       const groups = [...byCat.entries()].map(([key, amount]) => ({
         key,
-        label: HISTORY_CATEGORY_LABELS[key] ?? key,
+        label: HISTORY_SUBCATEGORY_LABELS[key] ?? key,
         amount,
       }));
       return {
@@ -179,6 +211,13 @@ export const api = {
       fd.append('replace', replace ? 'true' : 'false');
       return http.upload<ImportSummary & { removed: number; format: string; companyId: string | null }>('/operations/import', fd);
     },
+  },
+  /** Демо-выписки (ТЗ-доработка WP-7 §13): список и подгрузка в аккаунт. */
+  demo: {
+    companies: () => http.get<{ companies: DemoFile[] }>('/demo/companies'),
+    /** Подгружает выбранную (или первую) демо-выписку, заменяя прежние демо-операции. */
+    load: (company?: string) =>
+      http.post<DemoLoadResponse>('/demo', company ? { company } : {}),
   },
   sandbox: {
     simulate: (body: SandboxSimulateRequest) =>

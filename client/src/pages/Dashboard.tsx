@@ -9,6 +9,7 @@ import {
   FlaskConical,
   PiggyBank,
   Plus,
+  Sparkles,
   Wallet,
   X,
   type LucideIcon,
@@ -124,6 +125,53 @@ export default function Dashboard() {
             <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
               Ошибка обновления данных: {dashboard.error.message}. Показаны последние загруженные значения.
             </div>
+          )}
+
+          {/* ТЗ-доработка WP-7 §9: баннер опорной даты выписки (now − asOf > 3 дн.) */}
+          {d.dataQuality?.asOf &&
+            Math.floor((Date.now() - new Date(`${d.dataQuality.asOf}T00:00:00`).getTime()) / 86_400_000) > 3 && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                <CalendarDays size={16} className="mt-0.5 shrink-0" />
+                <span>
+                  Данные выписки на{' '}
+                  <span className="font-semibold">
+                    {new Date(`${d.dataQuality.asOf}T00:00:00`).toLocaleDateString('ru-RU')}
+                  </span>
+                  . Прогноз построен от этой даты.
+                </span>
+              </div>
+            )}
+          {/* ТЗ-доработка WP-7 §11: порог нарушен уже сейчас */}
+          {d.alreadyBelowThreshold === true && (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Порог уже нарушен: остаток <span className="font-semibold">{formatRub(d.balance)}</span>{' '}
+                {d.threshold != null ? (
+                  <>
+                    ниже порога <span className="font-semibold">{formatRub(d.threshold)}</span>.
+                  </>
+                ) : (
+                  'отрицательный (овердрафт).'
+                )}{' '}
+                Чтобы закрыть разрыв, нужно внести <span className="font-semibold">{formatRub(d.forecast.gapAmount)}</span>.
+              </span>
+            </div>
+          )}
+          {/* ТЗ-доработка WP-7 §10: пустая выписка — пустое состояние с кнопкой загрузки */}
+          {(d.dataQuality?.historyDays ?? 0) === 0 && (
+            <Card>
+              <EmptyState
+                title="Данных по выписке пока нет"
+                hint="Загрузите банковскую выписку или воспользуйтесь демо-данными — прогноз построится автоматически"
+                icon={Wallet}
+              />
+              <div className="flex justify-center pb-6">
+                <Button icon={Plus} onClick={() => navigate('/payments')}>
+                  Загрузить выписку
+                </Button>
+              </div>
+            </Card>
           )}
 
           {/* 1. Общий баланс */}
@@ -257,8 +305,13 @@ export default function Dashboard() {
                       <span>
                         Вероятность:{' '}
                         <span className="font-semibold text-rose-400">
-                          {Math.round(d.forecast.gapProbabilityPct)}%
+                          {d.forecast.gapProbabilityPct != null ? `${Math.round(d.forecast.gapProbabilityPct)}%` : '—'}
                         </span>
+                        {d.forecast.gapProbabilityPct == null && (
+                          <span className="ml-1 font-normal text-slate-500">
+                            (данных недостаточно — история выписки короче 14 дней)
+                          </span>
+                        )}
                       </span>
                       <span>
                         Сумма: <span className="font-semibold text-rose-400">{formatRub(d.forecast.gapAmount)}</span>
@@ -304,6 +357,9 @@ export default function Dashboard() {
 
           {/* 6. План-факт (ТЗ-доработка WP-5) */}
           <PlanFactCard />
+
+          {/* 6.1. Демо-данные (ТЗ-доработка WP-7 §13) */}
+          <DemoDataCard onLoaded={refreshAll} />
 
           {/* 7. Пункты меню: песочница и календарь (ТЗ §5.2.6) */}
           <Card title="Меню">
@@ -711,5 +767,59 @@ function ThresholdEditor({ value, onSaved }: { value?: number; onSaved: () => vo
       </button>
       {msg && <span className={msg === 'Сохранено' ? 'text-emerald-400' : 'text-rose-400'}>{msg}</span>}
     </div>
+  );
+}
+
+/** Демо-выписки (ТЗ-доработка WP-7 §13): список из test-data/demo/ + подгрузка в аккаунт. */
+function DemoDataCard({ onLoaded }: { onLoaded: () => void }) {
+  const [busyFile, setBusyFile] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const companies = useAsync(() => api.demo.companies(), []);
+  const list = companies.data?.companies ?? [];
+  if (list.length === 0) return null;
+
+  async function load(file: string) {
+    setBusyFile(file);
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await api.demo.load(file);
+      setMsg(`Загружено: ${r.file} — ${r.operationsImported} операций (данные на ${r.asOf})`);
+      onLoaded();
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setBusyFile(null);
+    }
+  }
+
+  return (
+    <Card title="Демо-данные">
+      <div className="space-y-2">
+        {list.map((f) => (
+          <div key={f.file} className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-200">{f.label}</p>
+              <p className="text-xs text-slate-500">{f.file}</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Sparkles}
+              loading={busyFile === f.label}
+              onClick={() => load(f.label)}
+            >
+              Загрузить
+            </Button>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">
+        Демо-выписки загружаются из test-data/demo/ и заменяют ранее загруженные демо-операции.
+      </p>
+      {msg && <p className="mt-2 text-xs text-emerald-400">{msg}</p>}
+      {err && <p className="mt-2 text-xs text-rose-400">{err}</p>}
+    </Card>
   );
 }

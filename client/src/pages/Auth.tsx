@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Sparkles } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { useAuthStore } from '@/store/auth';
-import { Button, Card, Field, Input } from '@/components/ui';
+import { Button, Card, Field, Input, Modal } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import type { AuthResponse } from '@/types/api';
 
@@ -28,6 +28,8 @@ export default function Auth() {
   const [regInn, setRegInn] = useState('');
   const [regFile, setRegFile] = useState<File | null>(null);
   const [useDemo, setUseDemo] = useState(false);
+  /** ТЗ-доработка WP-7 §5: окно «Загружено N, пропущено M» после регистрации с выпиской. */
+  const [importResult, setImportResult] = useState<AuthResponse | null>(null);
 
   function finish(res: AuthResponse) {
     setAuth(res.token, res.user);
@@ -78,13 +80,19 @@ export default function Auth() {
     if (useDemo) fd.append('useDemoData', 'true');
     else if (regFile) fd.append('file', regFile);
     try {
-      finish(await api.auth.register(fd));
+      const res = await api.auth.register(fd);
+      // ТЗ-доработка WP-7 §5: сначала показать итог импорта («Загружено N, пропущено M»),
+      // «Продолжить» ведёт на главную; закрытие окна тоже входит в приложение.
+      if (res.import) setImportResult(res);
+      else finish(res);
     } catch (err) {
       setFormError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
+
+  const imp = importResult?.import;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
@@ -236,6 +244,58 @@ export default function Auth() {
             </form>
           )}
         </Card>
+
+        {/* ТЗ-доработка WP-7 §5: итог импорта после регистрации */}
+        <Modal
+          open={!!importResult}
+          onClose={() => {
+            if (importResult) finish(importResult);
+            setImportResult(null);
+          }}
+          title={imp ? `Загружено ${imp.imported}, пропущено ${imp.skipped}` : ''}
+          footer={
+            <Button
+              className="w-full"
+              onClick={() => {
+                if (importResult) finish(importResult);
+                setImportResult(null);
+              }}
+            >
+              Продолжить
+            </Button>
+          }
+        >
+          {imp && (
+            <div className="space-y-3 text-sm text-slate-300">
+              <dl className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+                <div>Строк в файле: {imp.rowsTotal}</div>
+                <div>Дубли удалено: {imp.duplicatesRemoved}</div>
+              </dl>
+              {imp.warnings.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-400">
+                    Ошибки и предупреждения (первые {Math.min(imp.warnings.length, 10)}):
+                  </p>
+                  <ul className="max-h-40 space-y-1 overflow-auto rounded-lg bg-slate-950/50 p-2 text-xs text-amber-300">
+                    {imp.warnings.slice(0, 10).map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {imp.dataQuality?.level === 'insufficient' && (
+                <p className="text-xs text-amber-300">
+                  История короче 14 дней — прогноз ориентировочный, вероятность разрыва не оценивается.
+                </p>
+              )}
+              {imp.dataQuality?.warnings?.slice(0, 3).map((w, i) => (
+                <p key={i} className="text-xs text-slate-400">
+                  {w}
+                </p>
+              ))}
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );
