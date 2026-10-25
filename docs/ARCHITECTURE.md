@@ -101,7 +101,7 @@ Seed задаёт демо-учётке порог разрыва T = P25-ква
 
 ## 6. Развёртывание
 
-- VPS Ubuntu: `/opt/cashflow` — клиент собран (`client/dist`), бэкенд под PM2 (имя `cashflow`), Nginx: порт 80 → статика + прокси `/api` → `127.0.0.1:5000`; UFW открыт только 22/80; порт 5000 закрыт наружу.
+- Целевая среда (в репозитории нет конфигов): VPS Ubuntu: `/opt/cashflow` — клиент собран (`client/dist`), бэкенд под PM2 (имя `cashflow`), Nginx: порт 80 → статика + прокси `/api` → `127.0.0.1:5000`; UFW открыт только 22/80; порт 5000 закрыт наружу.
 - База: `server/prisma/dev.db` (SQLite); демо-вход `demo@cashflow.ru` / `demo1234` (сид, контракт docs/api-contract.md; `FORECAST_AS_OF` в server/.env применяется только к этой демо-учётке, ТЗ-доработка §9).
 - Локально: `npm run dev` (5000 + 5173), `npm test` (vitest, server), `npm run lint`, `npm run build`.
 

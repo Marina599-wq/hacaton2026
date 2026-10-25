@@ -33,4 +33,4 @@
 
 ## Отклонения от ТЗ
 
-- П. 11 (удаление `support.service.js`): в актуальном коде `support.service.js` импортируется живым `support.controller.js` (маршрут `/api/support` в работе), а не «импортируют прisma из server.js и не используются». Поэтому удалены 4 действительно мёртвых сервиса (`auth`, `dashboard`, `operations`, `risks`), `support.service.js` оставлен — в соответствии с правилом ТЗ п. 5 («работающие фичи не удаляются и не ломаются»).
+- П. 11 (удаление мёртвых сервисов): удалены мёртвые сервисы, в том числе `support.service.js`; `support.controller.js` работает напрямую через общий `prisma` из `config/db.js` (маршрут `/api/support` жив — см. docs/api-contract.md и `check-contract.mjs`), файл `server/src/services/support.service.js` в репозитории отсутствует.
