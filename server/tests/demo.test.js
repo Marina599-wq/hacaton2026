@@ -57,16 +57,16 @@ describe('/api/demo (ТЗ-доработка WP-7 §13)', () => {
     const body = await r.json();
     expect(Array.isArray(body.companies)).toBe(true);
     expect(body.companies.length).toBeGreaterThan(0);
-    expect(body.companies.map((c) => c.file)).toContain('statement-demo-C001.csv');
+    expect(body.companies.map((c) => c.file)).toContain('statement-demo-C096.csv');
   });
 
   it('POST /api/demo — загружает первую демо-выписку в аккаунт', async () => {
     const r = await demoPost({}, { authorization: `Bearer ${token}` });
     expect(r.status).toBe(201);
-    expect(r.body.file).toBe('statement-demo-C001.csv');
-    expect(r.body.operationsImported).toBeGreaterThan(1000);
+    expect(r.body.file).toBe('statement-demo-C096.csv');
+    expect(r.body.operationsImported).toBeGreaterThan(500);
     expect(r.body.replaced).toBe(0);
-    expect(r.body.asOf).toBe('2026-09-29');
+    expect(r.body.asOf).toBe('2026-09-30');
     expect(r.body.rowErrors).toBe(0);
   });
 
@@ -77,7 +77,7 @@ describe('/api/demo (ТЗ-доработка WP-7 §13)', () => {
   });
 
   it('POST /api/demo { company } — выбор по имени, неизвестная — 400', async () => {
-    const ok = await demoPost({ company: 'statement-demo-C001' }, { authorization: `Bearer ${token}` });
+    const ok = await demoPost({ company: 'statement-demo-C096' }, { authorization: `Bearer ${token}` });
     expect(ok.status).toBe(201);
     const bad = await demoPost({ company: 'nope' }, { authorization: `Bearer ${token}` });
     expect(bad.status).toBe(400);

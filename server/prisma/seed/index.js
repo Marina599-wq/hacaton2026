@@ -1,13 +1,15 @@
 // server/prisma/seed/index.js
 // ТЗ-доработка WP-7 §13: демо-данные — выписки из test-data/demo/, а не генератор
 // (demo-data.js удалён). Контракт (docs/api-contract.md): demo@cashflow.ru / demo1234,
-// 18–24 месяца операций, разрыв гарантированно находится моделью на горизонте 30–60 дней.
-// Файлы в test-data/demo/ выбирает node server/scripts/pick-demo.mjs (критерии ТЗ §13).
-// Отчёт аудита §2.2/§2.4: у демо-учётки должен быть план (PlannedEvent по каждому типу:
-// договор, счёт, налог, просроченный платёж), чтобы план-факт не был нулевым, и дефолтный
-// порог разрыва T (User.minBalance) = P25-квантиль остатков выписки — на C001/asOf=2026-09-29
-// на главной виден будущий разрыв (gapDate в будущем, gapProbabilityPct > 0; docs/backtest-results.json:
-// на C001 фактический разрыв случился при пороге P25).
+// разрыв гарантированно находится моделью на горизонте 30–60 дней.
+// Демо — 3 выписки организаторов (датасет, test-data/statements/, all_operations-кросс-чек):
+//   C096 — ИП, «Продажи на маркетплейсах» (01.10.2024–30.09.2026, 594 оп.),
+//   C097 — ООО, «Производство мебели на заказ» (22.09.2025–30.09.2026, 429 оп.),
+//   C098 — ИП, «IT-услуги и разработка» (01.10.2024–17.10.2025, 373 оп. — архивная).
+// Активная (самая свежая) выписка C096/C097 (asOf = 2026-09-30, см. FORECAST_AS_OF в server/.env.example):
+//   дефолтный порог разрыва T (User.minBalance) = P25-квантиль остатков C096 ≈ 1,74 млн ₽
+//   (остаток на 09-30 ≈ 1,27 млн ₽ — ниже P25; крупный плановый capex 25.10.2026 удерживает
+//   медианный путь ниже порога → на главной виден БУДУЩИЙ разрыв, docs/backtest-results.json).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,24 +45,24 @@ async function main() {
 
   // Сначала разбираем все выписки (данные + P25-порог), потом пишем в БД
   const parsedFiles = [];
-  let lastDate = null;
   for (const file of files) {
     const parsed = await parseBankStatement(fs.readFileSync(path.join(DEMO_DIR, file)), file);
     if (parsed.operations.length === 0) {
       throw new Error('Демо-выписка пустая: ' + file);
     }
-    parsedFiles.push({ file, operations: parsed.operations });
-    lastDate = parsed.operations[parsed.operations.length - 1].date;
+    parsedFiles.push({ file, operations: parsed.operations, lastDate: parsed.operations[parsed.operations.length - 1].date });
   }
+  // Активная выписка — максимум по дате последней операции (НЕ алфавитный порядок):
+  // свежие C096/C097 (30.09.2026), C098 — архив (17.10.2025). При равенстве дат — первая в списке (C096).
+  const active = parsedFiles.reduce((best, f) => (f.lastDate > best.lastDate ? f : best), parsedFiles[0]);
 
-  // Порог разрыва T демо-юзера — P25-квантиль остатков последней демо-выписки
-  // (по дням, как в бэктесте). В docs/backtest-results.json на C001 разрыв случился при P25;
-  // T ≈ 1,49 млн ₽ (остаток на 2026-09-29 ≈ 1,72 млн ₽ → разрыв в будущем, а не «порог уже нарушен»).
+  // Порог разрыва T демо-юзера — P25-квантиль остатков АКТИВНОЙ выписки (по дням, как в бэктесте).
   const balByDay = new Map();
-  for (const op of parsedFiles[parsedFiles.length - 1].operations) {
+  for (const op of active.operations) {
     balByDay.set(new Date(op.date).toISOString().slice(0, 10), op.balanceEndOfDay); // строки хронологические
   }
   const p25 = Math.round(percentile([...balByDay.values()], 25));
+  const asOf = String(active.lastDate).slice(0, 10);
 
   // Контракт: демо@cashflow.ru / demo1234
   const hashedPassword = await bcrypt.hash('demo1234', 10);
@@ -70,8 +72,7 @@ async function main() {
     create: {
       email: 'demo@cashflow.ru',
       passwordHash: hashedPassword,
-      // Название и вид бизнеса — из companies.csv датасета; до получения датасета — нейтральная заглушка
-      companyName: 'Демо-компания (выписка организаторов)',
+      companyName: 'Демо-компания (выписки организаторов)',
       inn: '0000000001',
       minBalance: p25, // дефолтный порог разрыва T = P25 остатков (см. выше)
     },
@@ -99,72 +100,66 @@ async function main() {
   }
 
   // Плановые события демо (аудит §2.2/§2.4: план-факт не должен быть нулевым).
-  // Даты согласованы с asOf демо (2026-09-29) и данными C001:
-  // - налог: ЕНП 225 983 ₽ 18.09.2026 реально есть в выписке (факт: paid) + октябрьский в плане;
-  // - договор/счёт: контрагенты и суммы — из реальных регулярных платёжей C001;
-  // - просроченный платёж: входящий счёт, ожидали 15.09.2026, оплата не поступила (overdue);
-  // - крупная плановая покупка 20.10.2026 (900 000 ₽): уводит медианный путь остатка ниже T,
-  //   поэтому на главной виден БУДУЩИЙ разрыв (gapDate=2026-10-20, вероятность > 0 при T=P25).
-  const allInn = new Set(parsedFiles.flatMap((f) => f.operations.map((o) => o.counterpartyInn)));
+  // Значения выняты из реальных регулярностей демо-выписок C096/C097 (asOf = 2026-09-30):
   const fact = (where) => prisma.operation.findFirst({ where: { userId: demoUser.id, ...where } });
-  const paidTax = await fact({ externalId: 'C001-001106' }); // ЕНП 225 983 ₽ от 18.09.2026 в C001
+  const paidTax = await fact({ externalId: 'C096-000591' }); // ЕНП 25 934 ₽ от 28.09.2026 в C096
   const events = [
-    // 1) Договор (исходящий, будущий): регулярное пополнение топливных карт по договору № 9161
+    // 1) Договор (исходящий, будущий): аренда — АО «Арендодатель-880» платит 02–03-го числа месяца (24 операции)
     {
-      type: 'contract', direction: 'out', amount: 200000, expectedDate: new Date('2026-10-08T00:00:00Z'),
+      type: 'contract', direction: 'out', amount: 22000, expectedDate: new Date('2026-10-02T00:00:00Z'),
       issueDate: new Date('2026-09-01T00:00:00Z'), status: 'pending', source: '1c',
-      counterpartyName: 'ООО «Топливная компания-660»', counterpartyInn: '0062343230',
-      title: 'Оплата по договору № 9161 (топливные карты), октябрь 2026',
+      counterpartyName: 'АО «Арендодатель-880»', counterpartyInn: '0076144034',
+      title: 'Оплата аренды по договору № 97, октябрь 2026',
     },
-    // 2) Счёт (входящий, будущий): от регулярного клиента C001 (150 487,80 ₽ за 28.09.2026)
+    // 2) Счёт (входящий, будущий): Маркетплейс-568 — 105 поступлений, медиана 97 512,87 ₽
     {
-      type: 'invoice', direction: 'in', amount: 150487.8, expectedDate: new Date('2026-10-15T00:00:00Z'),
+      type: 'invoice', direction: 'in', amount: 97512.87, expectedDate: new Date('2026-10-15T00:00:00Z'),
       issueDate: new Date('2026-09-25T00:00:00Z'), status: 'pending', source: 'edo',
-      counterpartyName: 'ООО «Торговый дом-169»', counterpartyInn: '0084388330',
-      title: 'Оплата по счёту № 901 от 25.09.2026',
+      counterpartyName: 'ООО «Маркетплейс-568»', counterpartyInn: '0035185049',
+      title: 'Оплата по счетам за октябрь 2026',
     },
-    // 3) Налог (будущий): ЕНП по образцу сентября (225 983 ₽, 28-е число месяца)
+    // 3) Налог (будущий): ЕНП октябрь, по образцу сентября (25 934 ₽, 28-е число)
     {
-      type: 'tax', direction: 'out', amount: 225983, expectedDate: new Date('2026-10-18T00:00:00Z'),
-      issueDate: new Date('2026-09-18T00:00:00Z'), status: 'pending', source: 'tax-calendar',
+      type: 'tax', direction: 'out', amount: 25934, expectedDate: new Date('2026-10-28T00:00:00Z'),
+      issueDate: new Date('2026-09-28T00:00:00Z'), status: 'pending', source: 'tax-calendar',
       counterpartyName: 'Казначейство России (ФНС России)', counterpartyInn: '7727406020',
       title: 'Единый налоговый платеж (октябрь 2026)',
     },
-    // 4) Просроченный платёж (входящий): счёт от 05.09.2026, ожидался 15.09.2026, оплата не поступила.
-    //    ИНН 0091011200 отсутствует в выписке C001 — reconcile стабильно держит статус overdue.
+    // 4) Просроченный платёж (исходящий, C097): Фурнитура-434, последний платёж 03.08.2026 (282 729,74 ₽);
+    //    ожидаемый по циклу 03.09.2026 — не отправлен (после 03.08 платежей этому ИНН нет).
+    //    Факт 03.08 не свернётся: окно reconcile ±3 дня (planGraceDays), а дата — на 31 день позже.
     {
-      type: 'invoice', direction: 'in', amount: 120000, expectedDate: new Date('2026-09-15T00:00:00Z'),
-      issueDate: new Date('2026-09-05T00:00:00Z'), status: 'overdue', source: '1c',
-      counterpartyName: 'ООО «Логистик-300»', counterpartyInn: '0091011200',
-      title: 'Оплата по счёту № 902 от 05.09.2026 (не поступила)',
+      type: 'contract', direction: 'out', amount: 282729.74, expectedDate: new Date('2026-09-03T00:00:00Z'),
+      issueDate: new Date('2026-08-01T00:00:00Z'), status: 'overdue', source: '1c',
+      counterpartyName: 'ООО «Фурнитура-434»', counterpartyInn: '0035378298',
+      title: 'Оплата по договору за фурнитуру (не отправлен)',
     },
-    // 5) Крупный одноразовый плановый платёж (capex): будущая дата, источник — план пользователя
+    // 5) Крупный одноразовый плановый платёж (capex): уводит медианный путь остатка ниже T (P25 ≈ 1,74 млн ₽)
+    //    → на главной виден будущий разрыв на горизонте 30–60 дней от asOf=2026-09-30.
     {
-      type: 'contract', direction: 'out', amount: 900000, expectedDate: new Date('2026-10-20T00:00:00Z'),
+      type: 'contract', direction: 'out', amount: 1200000, expectedDate: new Date('2026-10-25T00:00:00Z'),
       issueDate: new Date('2026-09-10T00:00:00Z'), status: 'pending', source: 'manual',
-      title: 'Капитальные расходы: покупка двух грузовиков',
+      title: 'Капитальные расходы: покупка оборудования для склада (октябрь 2026)',
     },
   ];
   // 6) Налог с фактом (paid) — только если факт-операция нашлась в выписке (иначе дубль №3 уже покрывает тип tax)
-  if (paidTax && allInn.has('7727406020')) {
+  if (paidTax) {
     events.push({
-      type: 'tax', direction: 'out', amount: 225983, expectedDate: new Date('2026-09-18T00:00:00Z'),
-      issueDate: new Date('2026-08-25T00:00:00Z'), status: 'paid', paidAmount: 225983,
+      type: 'tax', direction: 'out', amount: 25934, expectedDate: new Date('2026-09-28T00:00:00Z'),
+      issueDate: new Date('2026-08-28T00:00:00Z'), status: 'paid', paidAmount: 25934,
       factOperationId: paidTax.id, source: 'tax-calendar',
       counterpartyName: 'Казначейство России (ФНС России)', counterpartyInn: '7727406020',
       title: 'Единый налоговый платеж (сентябрь 2026)',
     });
   }
-  // Защита от замены демо-датасета: просроченный платёж создаём только если его ИНН чужд выписке
-  const seedEvents = events.filter((e) => e.status !== 'overdue' || !allInn.has(e.counterpartyInn));
   await prisma.plannedEvent.createMany({
-    data: seedEvents.map((e) => ({ ...e, userId: demoUser.id, active: true })),
+    data: events.map((e) => ({ ...e, userId: demoUser.id, active: true })),
   });
-  console.log(`📅 Плановые события: ${seedEvents.length} (T = P25 = ${p25.toLocaleString('ru-RU')} ₽)`);
+  console.log(`📅 Плановые события: ${events.length} (T = P25 = ${p25.toLocaleString('ru-RU')} ₽)`);
 
-  // ТЗ-доработка WP-7 §9/§13: опорная дата демо — последняя дата выписки;
+  // ТЗ-доработка WP-7 §9/§13: опорная дата демо — последняя дата АКТИВНОЙ выписки;
   // для демо-пользователя задаётся FORECAST_AS_OF (см. server/.env.example).
-  console.log(`✨ Seed завершён: ${total} операций. FORECAST_AS_OF для демо: ${String(lastDate).slice(0, 10)}`);
+  console.log(`✨ Seed завершён: ${total} операций. FORECAST_AS_OF для демо: ${asOf}`);
 }
 
 main()
